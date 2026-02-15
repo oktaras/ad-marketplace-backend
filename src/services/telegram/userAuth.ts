@@ -173,10 +173,19 @@ async function loadGramJs(): Promise<GramJsRuntime> {
   }
 
   let passwordModule: any = null;
-  try {
-    passwordModule = await dynamicImport('telegram/Password');
-  } catch {
-    passwordModule = null;
+  const passwordCandidates = [
+    'telegram/Password.js',
+    'telegram/Password',
+    'telegram/password.js',
+    'telegram/password',
+  ];
+  for (const modulePath of passwordCandidates) {
+    try {
+      passwordModule = await dynamicImport(modulePath);
+      break;
+    } catch {
+      // Try next candidate path.
+    }
   }
 
   const TelegramClient = telegramModule.TelegramClient || telegramModule.default?.TelegramClient;
