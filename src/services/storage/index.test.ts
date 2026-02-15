@@ -17,6 +17,7 @@ async function loadValidatorWithEnv(overrides: Record<string, string | undefined
   return {
     validateSubmittedMediaUrl: module.validateSubmittedMediaUrl,
     prepareUploads: module.prepareUploads,
+    createPresignedS3ReadUrl: module.createPresignedS3ReadUrl,
     restore: () => {
       for (const [key, value] of previous.entries()) {
         if (value === undefined) {
@@ -94,6 +95,25 @@ describe('validateSubmittedMediaUrl', () => {
       expect(prepared).toHaveLength(1);
       expect(prepared[0]?.publicUrl).toMatch(/^https:\/\/bucket-private\.example\.com\/creative\//);
       expect(prepared[0]?.publicUrl).not.toContain('@');
+    } finally {
+      restore();
+    }
+  });
+
+  it('creates signed s3 read url from storage key', async () => {
+    const { createPresignedS3ReadUrl, restore } = await loadValidatorWithEnv({
+      AWS_PUBLIC_ENDPOINT_URL: 'https://bucket-public.example.com',
+      AWS_ENDPOINT_URL: 'https://bucket-private.example.com',
+      AWS_S3_BUCKET_NAME: 'creative',
+      AWS_ACCESS_KEY_ID: 'AKIA_TEST',
+      AWS_SECRET_ACCESS_KEY: 'secret',
+      AWS_S3_READ_URL_TTL_SECONDS: '180',
+    });
+    try {
+      const signed = createPresignedS3ReadUrl('/creative/deal/file.png');
+      expect(signed).toContain('X-Amz-Algorithm=AWS4-HMAC-SHA256');
+      expect(signed).toContain('X-Amz-Expires=180');
+      expect(signed).toContain('/creative/deal/file.png');
     } finally {
       restore();
     }

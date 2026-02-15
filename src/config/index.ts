@@ -243,6 +243,7 @@ export const config = {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
       forcePathStyle: parseBoolean(process.env.AWS_S3_FORCE_PATH_STYLE, true),
+      readUrlTtlSeconds: parseNumber(process.env.AWS_S3_READ_URL_TTL_SECONDS, 300),
     },
   },
 } as const;

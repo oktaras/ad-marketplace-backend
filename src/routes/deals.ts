@@ -17,7 +17,12 @@ import { appEvents, AppEvent } from '../services/events.js';
 import { jobQueue, JobType } from '../services/jobs/index.js';
 import { openDealChatInPrivateTopic } from '../services/telegram/bot.js';
 import { normalizeCurrencyInput, requiredCurrencySchema } from '../lib/currency.js';
-import { normalizeCreativeMediaMeta, prepareUploads, validateSubmittedMediaUrl } from '../services/storage/index.js';
+import {
+  createPresignedS3ReadUrl,
+  normalizeCreativeMediaMeta,
+  prepareUploads,
+  validateSubmittedMediaUrl,
+} from '../services/storage/index.js';
 
 const router = Router();
 
@@ -50,6 +55,115 @@ function replaceUrlOrigin(urlString: string, newOrigin: string): string {
   } catch {
     return urlString;
   }
+}
+
+function normalizeStorageKey(value: string): string | null {
+  const trimmed = value.trim().replace(/^\/+/, '');
+  return trimmed ? trimmed : null;
+}
+
+function extractS3StorageKeyFromPublicUrl(urlString: string): string | null {
+  if (!config.media.s3.publicBaseUrl) {
+    return null;
+  }
+
+  try {
+    const mediaUrl = new URL(urlString);
+    const publicBase = new URL(config.media.s3.publicBaseUrl);
+    if (mediaUrl.origin.toLowerCase() !== publicBase.origin.toLowerCase()) {
+      return null;
+    }
+
+    const basePath = publicBase.pathname.replace(/\/+$/, '');
+    const prefix = basePath ? `${basePath}/` : '/';
+    if (!mediaUrl.pathname.startsWith(prefix)) {
+      return null;
+    }
+
+    const encodedKey = mediaUrl.pathname.slice(prefix.length);
+    if (!encodedKey) {
+      return null;
+    }
+
+    const decodedKey = encodedKey
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment);
+        } catch {
+          return segment;
+        }
+      })
+      .join('/');
+
+    return normalizeStorageKey(decodedKey);
+  } catch {
+    return null;
+  }
+}
+
+function withSignedCreativeMediaUrls(creative: unknown): unknown {
+  if (!creative || typeof creative !== 'object') {
+    return creative;
+  }
+
+  const source = creative as Record<string, unknown>;
+  if (!Array.isArray(source.media)) {
+    return creative;
+  }
+
+  let changed = false;
+  const signedMedia = source.media.map((item) => {
+    if (!item || typeof item !== 'object') {
+      return item;
+    }
+
+    const mediaItem = item as Record<string, unknown>;
+    const fromField = typeof mediaItem.storageKey === 'string'
+      ? normalizeStorageKey(mediaItem.storageKey)
+      : null;
+    const fromUrl = typeof mediaItem.url === 'string'
+      ? extractS3StorageKeyFromPublicUrl(mediaItem.url)
+      : null;
+    const provider = typeof mediaItem.provider === 'string' ? mediaItem.provider.trim().toLowerCase() : '';
+    const isExplicitS3 = provider === 's3';
+    if (!isExplicitS3 && !fromUrl) {
+      return item;
+    }
+
+    const storageKey = fromField || fromUrl;
+
+    if (!storageKey) {
+      return item;
+    }
+
+    if (provider && provider !== 's3') {
+      return item;
+    }
+
+    try {
+      const signedUrl = createPresignedS3ReadUrl(storageKey, config.media.s3.readUrlTtlSeconds);
+      changed = true;
+      return {
+        ...mediaItem,
+        provider: 's3',
+        storageKey,
+        url: signedUrl,
+      };
+    } catch {
+      return item;
+    }
+  });
+
+  if (!changed) {
+    return creative;
+  }
+
+  return {
+    ...source,
+    media: signedMedia,
+  };
 }
 
 function getSingleParam(value: string | string[] | undefined): string {
@@ -281,7 +395,7 @@ function toSerializableDeal(deal: any, userId: string) {
     channelOwner: deal.channelOwner,
     adFormat: deal.adFormat,
     brief: deal.brief,
-    creative: deal.creative,
+    creative: withSignedCreativeMediaUrls(deal.creative),
     postingPlan: buildPostingPlanPayload(deal),
     dealChat,
     openDealChatUrl: buildOpenDealChatUrl(deal.id),

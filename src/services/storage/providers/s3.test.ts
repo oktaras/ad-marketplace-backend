@@ -55,4 +55,30 @@ describe('S3StorageProvider', () => {
     expect(provider.isAllowedMediaUrl(new URL('https://bucket-public.example.com/creative/file.png'))).toBe(false);
     expect(provider.isAllowedMediaUrl(new URL('https://example.com/files/creative/file.png'))).toBe(false);
   });
+
+  it('creates signed read url for private object access', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-02-15T12:00:00.000Z'));
+
+      const provider = new S3StorageProvider({
+        endpoint: 'https://bucket-private.example.com',
+        region: 'auto',
+        bucket: 'creative',
+        accessKeyId: 'AKIA_TEST',
+        secretAccessKey: 'secret',
+        publicBaseUrl: 'https://bucket-public.example.com',
+        forcePathStyle: true,
+        uploadTokenTtlSeconds: 600,
+      });
+
+      const signed = provider.createPresignedGetUrl('creative/deal 1/file #1.png', 120);
+      expect(signed).toContain('X-Amz-Algorithm=AWS4-HMAC-SHA256');
+      expect(signed).toContain('X-Amz-Expires=120');
+      expect(signed).toContain('X-Amz-Signature=');
+      expect(signed).toContain('/creative/deal%201/file%20%231.png');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

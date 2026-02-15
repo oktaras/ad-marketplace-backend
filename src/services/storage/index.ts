@@ -162,6 +162,18 @@ export function getLocalStorageProvider(): LocalStorageProvider {
   return localProvider;
 }
 
+export function createPresignedS3ReadUrl(
+  storageKey: string,
+  expiresInSeconds: number = config.media.s3.readUrlTtlSeconds,
+): string {
+  const normalizedStorageKey = storageKey.trim().replace(/^\/+/, '');
+  if (!normalizedStorageKey) {
+    throw new ValidationError('Storage key is required for S3 read url signing');
+  }
+
+  return s3Provider.createPresignedGetUrl(normalizedStorageKey, expiresInSeconds);
+}
+
 export function validateSubmittedMediaUrl(url: string, providerHint?: string | null): void {
   let parsed: URL;
   try {
