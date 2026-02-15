@@ -1,0 +1,4771 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Ads Marketplace API",
+    "version": "1.0.0",
+    "description": "API documentation for the Ads Marketplace platform - connecting advertisers with channel owners on Telegram",
+    "contact": {
+      "name": "API Support"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Development server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT authorization token"
+      },
+      "TelegramAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Telegram-Init-Data",
+        "description": "Telegram Mini App init data"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "details": {
+            "type": "object",
+            "description": "Additional error details"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "telegramId": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string",
+            "nullable": true
+          },
+          "firstName": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastName": {
+            "type": "string",
+            "nullable": true
+          },
+          "languageCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "isPremium": {
+            "type": "boolean"
+          },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "isAdvertiser": {
+            "type": "boolean"
+          },
+          "isChannelOwner": {
+            "type": "boolean"
+          },
+          "walletAddress": {
+            "type": "string",
+            "nullable": true
+          },
+          "onboardingCompleted": {
+            "type": "boolean"
+          },
+          "wallets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "isMain": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "verified": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "stats": {
+            "type": "object",
+            "properties": {
+              "channels": {
+                "type": "integer"
+              },
+              "dealsAsAdvertiser": {
+                "type": "integer"
+              },
+              "dealsAsPublisher": {
+                "type": "integer"
+              },
+              "briefs": {
+                "type": "integer"
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Channel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "telegramChatId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "language": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "ACTIVE",
+              "PAUSED",
+              "SUSPENDED",
+              "REMOVED"
+            ]
+          },
+          "isVerified": {
+            "type": "boolean"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "stats": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "subscribers": {
+                "type": "integer"
+              },
+              "avgViews": {
+                "type": "integer",
+                "nullable": true
+              },
+              "engagementRate": {
+                "type": "number",
+                "nullable": true
+              }
+            }
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "priceAmount": {
+                  "type": "string"
+                },
+                "priceCurrency": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "ownerId": {
+            "type": "string"
+          },
+          "completedDeals": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Listing": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "channelId": {
+            "type": "string"
+          },
+          "adFormatId": {
+            "type": "string"
+          },
+          "priceNanoTon": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Brief": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "advertiserId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "adFormatTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "customFormatDescription": {
+            "type": "string",
+            "nullable": true
+          },
+          "channelsLimit": {
+            "type": "integer",
+            "nullable": true
+          },
+          "targetCategories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "targetLanguages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "minSubscribers": {
+            "type": "integer",
+            "nullable": true
+          },
+          "maxSubscribers": {
+            "type": "integer",
+            "nullable": true
+          },
+          "minAvgViews": {
+            "type": "integer",
+            "nullable": true
+          },
+          "budgetMin": {
+            "type": "string",
+            "nullable": true
+          },
+          "budgetMax": {
+            "type": "string",
+            "nullable": true
+          },
+          "totalBudget": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "desiredStartDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "desiredEndDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "flexibility": {
+            "type": "string",
+            "enum": [
+              "STRICT",
+              "FLEXIBLE",
+              "ANYTIME"
+            ]
+          },
+          "hasCreative": {
+            "type": "boolean"
+          },
+          "creativeGuidelines": {
+            "type": "string",
+            "nullable": true
+          },
+          "applicationCount": {
+            "type": "integer",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ACTIVE",
+              "PAUSED",
+              "COMPLETED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Deal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "dealNumber": {
+            "type": "integer"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "LISTING",
+              "BRIEF",
+              "DIRECT"
+            ]
+          },
+          "channelId": {
+            "type": "string"
+          },
+          "advertiserId": {
+            "type": "string"
+          },
+          "channelOwnerId": {
+            "type": "string"
+          },
+          "adFormatId": {
+            "type": "string"
+          },
+          "briefId": {
+            "type": "string",
+            "nullable": true
+          },
+          "agreedPrice": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "scheduledTime": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "durationHours": {
+            "type": "integer",
+            "nullable": true
+          },
+          "isAdvertiser": {
+            "type": "boolean"
+          },
+          "isPublisher": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "advertiser": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "channelOwner": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "adFormat": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CREATED",
+              "NEGOTIATING",
+              "TERMS_AGREED",
+              "AWAITING_PAYMENT",
+              "FUNDED",
+              "AWAITING_CREATIVE",
+              "CREATIVE_SUBMITTED",
+              "CREATIVE_REVISION",
+              "CREATIVE_APPROVED",
+              "AWAITING_POSTING_PLAN",
+              "POSTING_PLAN_AGREED",
+              "SCHEDULED",
+              "AWAITING_MANUAL_POST",
+              "POSTING",
+              "POSTED",
+              "VERIFIED",
+              "COMPLETED",
+              "DISPUTED",
+              "RESOLVED",
+              "CANCELLED",
+              "REFUNDED",
+              "EXPIRED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Authentication endpoints"
+    },
+    {
+      "name": "Users",
+      "description": "User management"
+    },
+    {
+      "name": "Channels",
+      "description": "Channel management"
+    },
+    {
+      "name": "Listings",
+      "description": "Ad listings"
+    },
+    {
+      "name": "Briefs",
+      "description": "Advertiser briefs"
+    },
+    {
+      "name": "Deals",
+      "description": "Deal management"
+    },
+    {
+      "name": "Admin",
+      "description": "Admin operations"
+    }
+  ],
+  "paths": {
+    "/api/admin/stats": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Platform statistics",
+        "description": "Returns comprehensive platform statistics (admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Statistics retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stats": {
+                      "type": "object",
+                      "properties": {
+                        "totalUsers": {
+                          "type": "integer"
+                        },
+                        "totalChannels": {
+                          "type": "integer"
+                        },
+                        "totalDeals": {
+                          "type": "integer"
+                        },
+                        "completedDeals": {
+                          "type": "integer"
+                        },
+                        "activeListings": {
+                          "type": "integer"
+                        },
+                        "activeBriefs": {
+                          "type": "integer"
+                        },
+                        "totalVolume": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/config": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get system configuration",
+        "description": "Returns system configuration settings (admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuration retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "config": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Update system configuration",
+        "description": "Updates system configuration settings (admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "Key-value pairs of configuration updates"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Configuration updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/disputes": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get open disputes",
+        "description": "Returns all open disputes requiring admin attention",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disputes retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "disputes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/disputes/{id}/resolve": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Resolve a dispute",
+        "description": "Resolves a dispute with outcome and fund distribution (admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Dispute ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "outcome",
+                  "resolution"
+                ],
+                "properties": {
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "ADVERTISER_FAVOR",
+                      "PUBLISHER_FAVOR",
+                      "SPLIT",
+                      "REFUND_ALL"
+                    ],
+                    "description": "Dispute resolution outcome"
+                  },
+                  "resolution": {
+                    "type": "string",
+                    "description": "Detailed resolution explanation"
+                  },
+                  "advertiserRefundPercent": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Percentage refund to advertiser"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dispute resolved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dispute": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dispute not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/categories": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get all categories",
+        "description": "Returns all channel categories with hierarchy and channel counts",
+        "responses": {
+          "200": {
+            "description": "Categories retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/telegram": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Authenticate via Telegram Mini App",
+        "description": "Authenticates a user using Telegram Mini App init data and returns a JWT token",
+        "security": [
+          {
+            "TelegramAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string",
+                      "description": "JWT authentication token"
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "telegramId": {
+                          "type": "string"
+                        },
+                        "username": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "firstName": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "lastName": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "isAdvertiser": {
+                          "type": "boolean"
+                        },
+                        "isChannelOwner": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing Telegram init data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/wallet/connect": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Connect TON wallet to user account",
+        "description": "Links a TON wallet address to the authenticated user's account",
+        "security": [
+          {
+            "TelegramAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "address"
+                ],
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "description": "TON wallet address",
+                    "example": "EQD..."
+                  },
+                  "publicKey": {
+                    "type": "string",
+                    "description": "Wallet public key"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Wallet successfully connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "wallet": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "isActive": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or wallet already connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/wallet/verify": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Verify wallet ownership via signature",
+        "description": "Verifies wallet ownership by validating a signature of a message",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "address",
+                  "signature",
+                  "message"
+                ],
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "description": "TON wallet address to verify"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "description": "Signed message signature"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Original message that was signed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Wallet verified successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "verified": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid signature or wallet not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/wallet/{address}": {
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Disconnect a wallet from user account",
+        "description": "Removes the wallet connection from the authenticated user's account",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "TON wallet address to disconnect"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wallet disconnected successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Wallet not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/briefs": {
+      "get": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Browse active briefs",
+        "description": "Browse advertiser briefs for channel owners to apply",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "minBudget",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maxBudget",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Briefs retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "briefs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Brief"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Create a new brief",
+        "description": "Creates a new advertising brief with requirements and budget",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "description",
+                  "adFormatTypes",
+                  "currency"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "adFormatTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "POST",
+                        "STORY",
+                        "REPOST",
+                        "PINNED",
+                        "OTHER"
+                      ]
+                    }
+                  },
+                  "customFormatDescription": {
+                    "type": "string"
+                  },
+                  "channelsLimit": {
+                    "type": "integer"
+                  },
+                  "targetCategories": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "targetLanguages": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "minSubscribers": {
+                    "type": "integer"
+                  },
+                  "maxSubscribers": {
+                    "type": "integer"
+                  },
+                  "minAvgViews": {
+                    "type": "integer"
+                  },
+                  "budgetMin": {
+                    "type": "string"
+                  },
+                  "budgetMax": {
+                    "type": "string"
+                  },
+                  "totalBudget": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "description": "Brief currency (must be one of configured supported currencies)"
+                  },
+                  "desiredStartDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "desiredEndDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "flexibility": {
+                    "type": "string",
+                    "enum": [
+                      "STRICT",
+                      "FLEXIBLE",
+                      "ANYTIME"
+                    ],
+                    "default": "FLEXIBLE"
+                  },
+                  "hasCreative": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "creativeGuidelines": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Brief created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "brief": {
+                      "$ref": "#/components/schemas/Brief"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/briefs/my": {
+      "get": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Get current user's briefs",
+        "description": "Returns all briefs created by the authenticated user (as advertiser)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Briefs retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "briefs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Brief"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/briefs/{id}": {
+      "get": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Get brief details",
+        "description": "Returns detailed information about a specific brief",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brief ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Brief retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "brief": {
+                      "$ref": "#/components/schemas/Brief"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Brief not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Update brief",
+        "description": "Updates brief information (owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brief ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "budgetMin": {
+                    "type": "string"
+                  },
+                  "budgetMax": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "PAUSED",
+                      "CANCELLED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Brief updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "brief": {
+                      "$ref": "#/components/schemas/Brief"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not brief owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Brief not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Delete brief",
+        "description": "Permanently deletes a brief owned by the authenticated advertiser",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brief ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Brief deleted successfully"
+          },
+          "400": {
+            "description": "Brief has related deals and cannot be deleted"
+          },
+          "403": {
+            "description": "Not brief owner"
+          },
+          "404": {
+            "description": "Brief not found"
+          }
+        }
+      }
+    },
+    "/api/briefs/{id}/applications": {
+      "post": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Apply to a brief",
+        "description": "Submit application to a brief with channel and pricing proposal",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brief ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channelId",
+                  "proposedPrice"
+                ],
+                "properties": {
+                  "channelId": {
+                    "type": "string",
+                    "description": "Channel ID to propose for the brief"
+                  },
+                  "proposedPrice": {
+                    "type": "string",
+                    "description": "Proposed price for the advertisement"
+                  },
+                  "proposedDate": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Proposed publication date"
+                  },
+                  "pitch": {
+                    "type": "string",
+                    "description": "Application pitch message"
+                  },
+                  "selectedAdFormatIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Optional selected channel ad format IDs"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Application submitted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "application": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Already applied or invalid channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not channel owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Brief not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Get applications for a brief",
+        "description": "Returns all applications for a brief (advertiser only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brief ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Applications retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "applications": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not brief owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Brief not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/briefs/{id}/my-applications": {
+      "get": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Get current user's applications for a brief",
+        "description": "Returns applications submitted by the authenticated channel owner for this brief",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brief ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Applications retrieved successfully"
+          }
+        }
+      }
+    },
+    "/api/briefs/applications/{id}": {
+      "put": {
+        "tags": [
+          "Briefs"
+        ],
+        "summary": "Accept or reject a brief application",
+        "description": "Updates application status and creates a deal if accepted",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Application ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACCEPTED",
+                      "REJECTED"
+                    ]
+                  },
+                  "adFormatId": {
+                    "type": "string",
+                    "description": "Required if accepting - the ad format from the channel"
+                  },
+                  "rejectionReason": {
+                    "type": "string",
+                    "description": "Optional reason for rejection"
+                  },
+                  "scheduledPostTime": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Application updated successfully"
+          },
+          "400": {
+            "description": "Invalid status or missing required fields"
+          },
+          "403": {
+            "description": "Not brief owner"
+          },
+          "404": {
+            "description": "Application not found"
+          }
+        }
+      }
+    },
+    "/api/channels": {
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "List all active channels",
+        "description": "Browse marketplace channels with filtering and pagination",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Page number"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Items per page"
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by category slug"
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by language"
+          },
+          {
+            "in": "query",
+            "name": "minSubscribers",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Minimum subscribers count"
+          },
+          {
+            "in": "query",
+            "name": "maxSubscribers",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum subscribers count"
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search in title, username, or description"
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "subscribers",
+                "price",
+                "recent"
+              ],
+              "default": "subscribers"
+            },
+            "description": "Sort order"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Channel"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "limit": {
+                          "type": "integer"
+                        },
+                        "pages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Register a new channel",
+        "description": "Registers a new Telegram channel to the marketplace",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "telegramChatId",
+                  "title"
+                ],
+                "properties": {
+                  "telegramChatId": {
+                    "type": "number",
+                    "description": "Telegram chat ID of the channel"
+                  },
+                  "username": {
+                    "type": "string",
+                    "description": "Channel username"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Channel title"
+                  },
+                  "language": {
+                    "type": "string",
+                    "default": "en",
+                    "description": "Channel language"
+                  },
+                  "categoryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Category IDs"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Channel created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channel": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Channel already registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channels/my": {
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Get current user's channels",
+        "description": "Returns all channels owned by the authenticated user",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channels retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Channel"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channels/categories": {
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Get all channel categories",
+        "description": "Returns list of all available channel categories",
+        "responses": {
+          "200": {
+            "description": "Categories retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "icon": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channels/{id}/analytics": {
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Get channel analytics with availability metadata",
+        "description": "Returns latest metrics, growth summary and history snapshots",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          },
+          {
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "type": "integer",
+              "minimum": 7,
+              "maximum": 90,
+              "default": 30
+            },
+            "description": "Number of days of analytics history to include"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Analytics retrieved successfully"
+          },
+          "404": {
+            "description": "Channel not found"
+          }
+        }
+      }
+    },
+    "/api/channels/{id}/graphs": {
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Get channel graph data with time range filtering",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7d",
+                "30d",
+                "90d"
+              ]
+            },
+            "description": "Time range for graph data (default: 30d)"
+          },
+          {
+            "in": "query",
+            "name": "types",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated list of graph types (e.g., \"GROWTH,FOLLOWERS\")"
+          }
+        ]
+      }
+    },
+    "/api/channels/{id}/stats/refresh": {
+      "post": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Refresh channel statistics on demand (owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Channel stats refresh queued"
+          },
+          "403": {
+            "description": "Not channel owner"
+          },
+          "404": {
+            "description": "Channel not found"
+          }
+        }
+      }
+    },
+    "/api/channels/{id}/activate": {
+      "post": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Activate pending channel after admin re-verification (owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel activated successfully"
+          },
+          "403": {
+            "description": "Not channel owner"
+          },
+          "404": {
+            "description": "Channel not found"
+          }
+        }
+      }
+    },
+    "/api/channels/verify-and-add": {
+      "post": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Verify and add channel by username",
+        "description": "Verifies user is admin and bot has access, then adds channel",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channelUsername"
+                ],
+                "properties": {
+                  "channelUsername": {
+                    "type": "string",
+                    "description": "Channel username (with or without @)"
+                  },
+                  "categoryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Array of category IDs to assign to channel"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Channel successfully verified and added"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "User is not admin of the channel"
+          }
+        }
+      }
+    },
+    "/api/channels/{id}": {
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Get channel details",
+        "description": "Returns detailed information about a specific channel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel details retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channel": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Update channel",
+        "description": "Updates channel information (owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string"
+                  },
+                  "categoryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "PAUSED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Channel updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channel": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not channel owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channels/{id}/formats": {
+      "post": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Create ad format for channel",
+        "description": "Creates a new advertising format for the channel (owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "name",
+                  "priceAmount",
+                  "priceCurrency"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "POST",
+                      "STORY",
+                      "REPOST",
+                      "PINNED",
+                      "OTHER"
+                    ]
+                  },
+                  "customType": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "priceAmount": {
+                    "type": "string"
+                  },
+                  "priceCurrency": {
+                    "type": "string",
+                    "description": "Format currency (must be one of configured supported currencies)"
+                  },
+                  "durationHours": {
+                    "type": "integer",
+                    "default": 24
+                  },
+                  "maxLength": {
+                    "type": "integer"
+                  },
+                  "mediaAllowed": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "TEXT",
+                        "IMAGE",
+                        "VIDEO",
+                        "GIF",
+                        "DOCUMENT",
+                        "AUDIO",
+                        "POLL"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Format created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not channel owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Get channel's ad formats",
+        "description": "Returns all active advertising formats for a channel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Formats retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "formats": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channels/{id}/formats/{formatId}": {
+      "put": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Update an ad format",
+        "description": "Updates ad format fields for a channel (owner only)",
+        "security": [
+          {
+            "TelegramAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          },
+          {
+            "in": "path",
+            "name": "formatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Ad format ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "POST",
+                      "STORY",
+                      "REPOST",
+                      "PINNED",
+                      "OTHER"
+                    ]
+                  },
+                  "customType": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "priceAmount": {
+                    "type": "string"
+                  },
+                  "priceCurrency": {
+                    "type": "string"
+                  },
+                  "durationHours": {
+                    "type": "integer"
+                  },
+                  "maxLength": {
+                    "type": "integer"
+                  },
+                  "mediaAllowed": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "TEXT",
+                        "IMAGE",
+                        "VIDEO",
+                        "GIF",
+                        "DOCUMENT",
+                        "AUDIO",
+                        "POLL"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ad format updated successfully"
+          },
+          "403": {
+            "description": "Not channel owner"
+          },
+          "404": {
+            "description": "Ad format not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Delete an ad format",
+        "description": "Permanently deletes an ad format (hard delete)",
+        "security": [
+          {
+            "TelegramAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          },
+          {
+            "in": "path",
+            "name": "formatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Ad Format ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Format deleted successfully"
+          },
+          "403": {
+            "description": "Not channel owner"
+          },
+          "404": {
+            "description": "Format not found"
+          }
+        }
+      }
+    },
+    "/api/deals": {
+      "get": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Get user's deals",
+        "description": "Retrieve a paginated list of deals where the authenticated user is either the advertiser or channel owner",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "advertiser",
+                "publisher"
+              ]
+            },
+            "description": "Filter by user role in deals"
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by deal status"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Page number for pagination"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Number of items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved deals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deals": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "page": {
+                          "type": "integer"
+                        },
+                        "limit": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "pages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Create a new deal",
+        "description": "Create a new advertising deal between advertiser and channel owner",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "origin",
+                  "channelId",
+                  "adFormatId",
+                  "agreedPrice",
+                  "currency"
+                ],
+                "properties": {
+                  "origin": {
+                    "type": "string",
+                    "enum": [
+                      "LISTING",
+                      "BRIEF",
+                      "DIRECT"
+                    ],
+                    "description": "Origin of the deal"
+                  },
+                  "listingId": {
+                    "type": "string",
+                    "description": "Listing ID if origin is LISTING"
+                  },
+                  "briefId": {
+                    "type": "string",
+                    "description": "Brief ID if origin is BRIEF"
+                  },
+                  "applicationId": {
+                    "type": "string",
+                    "description": "Application ID if origin is BRIEF"
+                  },
+                  "channelId": {
+                    "type": "string",
+                    "description": "Channel ID for the deal"
+                  },
+                  "adFormatId": {
+                    "type": "string",
+                    "description": "Ad format ID"
+                  },
+                  "agreedPrice": {
+                    "type": "string",
+                    "description": "Agreed price for the deal"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "description": "Deal currency (must be one of configured supported currencies)"
+                  },
+                  "scheduledTime": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Scheduled time for the ad"
+                  },
+                  "durationHours": {
+                    "type": "integer",
+                    "default": 24,
+                    "description": "Duration in hours"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Deal created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deal": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or validation error"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "404": {
+            "description": "Channel or ad format not found"
+          }
+        }
+      }
+    },
+    "/api/deals/calculate-fee": {
+      "get": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Calculate fee breakdown",
+        "description": "Calculate platform fee and publisher amount for a given price",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "amount",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Amount to calculate fees for"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fee breakdown calculated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "amount": {
+                      "type": "string"
+                    },
+                    "platformFeeBps": {
+                      "type": "number"
+                    },
+                    "platformFeePercent": {
+                      "type": "number"
+                    },
+                    "platformFeeAmount": {
+                      "type": "string"
+                    },
+                    "publisherAmount": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Amount parameter required"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}": {
+      "get": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Get deal details",
+        "description": "Retrieve detailed information about a specific deal",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deal ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deal details retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deal": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid deal ID"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "403": {
+            "description": "Forbidden - user is not a party to this deal"
+          },
+          "404": {
+            "description": "Deal not found"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}/accept": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Accept deal terms",
+        "description": "Channel owner accepts the terms of the deal",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deal ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deal terms accepted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deal": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Deal cannot be accepted in current status"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "403": {
+            "description": "Forbidden - only channel owner can accept"
+          },
+          "404": {
+            "description": "Deal not found"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}/fund": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Get escrow payment info",
+        "description": "Deploy or retrieve per-deal escrow contract for payment",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deal ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Escrow payment information retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "escrow": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "string"
+                        },
+                        "amount": {
+                          "type": "string"
+                        },
+                        "reserveAmount": {
+                          "type": "string"
+                        },
+                        "totalAmount": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "transaction": {
+                      "type": "object",
+                      "properties": {
+                        "to": {
+                          "type": "string"
+                        },
+                        "amountNano": {
+                          "type": "string"
+                        },
+                        "payload": {
+                          "type": "string"
+                        },
+                        "stateInit": {
+                          "type": "string"
+                        },
+                        "deepLink": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Deal is not awaiting payment"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "403": {
+            "description": "Forbidden - only advertiser can fund"
+          },
+          "404": {
+            "description": "Deal not found"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}/verify-payment": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Verify escrow funded",
+        "description": "Verify that the escrow contract has been funded with the agreed amount",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deal ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Escrow funding verification completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "funded": {
+                      "type": "boolean",
+                      "description": "Whether the escrow is funded"
+                    },
+                    "invalidFunding": {
+                      "type": "boolean"
+                    },
+                    "rotation": {
+                      "type": "object"
+                    },
+                    "nextFundingTransaction": {
+                      "type": "object",
+                      "properties": {
+                        "to": {
+                          "type": "string"
+                        },
+                        "amountNano": {
+                          "type": "string"
+                        },
+                        "payload": {
+                          "type": "string"
+                        },
+                        "stateInit": {
+                          "type": "string"
+                        },
+                        "deepLink": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "contractInfo": {
+                      "type": "object",
+                      "properties": {
+                        "amount": {
+                          "type": "string"
+                        },
+                        "platformFee": {
+                          "type": "string"
+                        },
+                        "publisherAmount": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "balance": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No escrow wallet for this deal"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "403": {
+            "description": "Forbidden - user is not a party to this deal"
+          },
+          "404": {
+            "description": "Deal not found"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}/creative/media/prepare": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Prepare creative media uploads",
+        "description": "Returns direct upload instructions for creative media files.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/deals/{id}/creative": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Submit creative content",
+        "description": "Channel owner submits creative content for advertiser approval",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deal ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Creative text content"
+                  },
+                  "mediaUrls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Array of media URLs"
+                  },
+                  "mediaTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "TEXT",
+                        "IMAGE",
+                        "VIDEO",
+                        "GIF",
+                        "DOCUMENT",
+                        "AUDIO",
+                        "POLL"
+                      ]
+                    },
+                    "description": "Array of media types"
+                  },
+                  "buttons": {
+                    "type": "object",
+                    "description": "Button configuration"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Creative submitted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "creative": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or cannot submit creative in current status"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "403": {
+            "description": "Forbidden - only channel owner can submit creative"
+          },
+          "404": {
+            "description": "Deal not found"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}/creative/approve": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Approve creative",
+        "description": "Advertiser approves the submitted creative content",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deal ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Creative approved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No creative to approve"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "403": {
+            "description": "Forbidden - only advertiser can approve creative"
+          },
+          "404": {
+            "description": "Deal not found"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}/creative/revision": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Request creative revision",
+        "description": "Advertiser requests revision of the submitted creative with feedback",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deal ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "feedback": {
+                    "type": "string",
+                    "description": "Feedback for creative revision"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Creative revision requested successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No creative to revise"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "403": {
+            "description": "Forbidden - only advertiser can request revision"
+          },
+          "404": {
+            "description": "Deal not found"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}/posting-plan": {
+      "get": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Get posting plan proposals for a deal",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/deals/{id}/posting-plan/proposals": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Create posting plan proposal",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/deals/{id}/posting-plan/proposals/{proposalId}/respond": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Respond to posting plan proposal",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/deals/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Deals"
+        ],
+        "summary": "Cancel deal",
+        "description": "Cancel a deal (only allowed in certain states)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deal ID"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "description": "Reason for cancellation"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deal cancelled successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Deal cannot be cancelled in current status"
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing token"
+          },
+          "403": {
+            "description": "Forbidden - user is not a party to this deal"
+          },
+          "404": {
+            "description": "Deal not found"
+          }
+        }
+      }
+    },
+    "/api/listings": {
+      "get": {
+        "tags": [
+          "Listings"
+        ],
+        "summary": "Browse active listings",
+        "description": "Browse marketplace listings with filtering and pagination",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "minPrice",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maxPrice",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "formatType",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listings retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "listings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Listing"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Listings"
+        ],
+        "summary": "Create a new listing",
+        "description": "Creates a new advertising listing for a channel",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channelId",
+                  "adFormatId",
+                  "title"
+                ],
+                "properties": {
+                  "channelId": {
+                    "type": "string"
+                  },
+                  "adFormatId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "customPrice": {
+                    "type": "string"
+                  },
+                  "customCurrency": {
+                    "type": "string"
+                  },
+                  "availableFrom": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "availableTo": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "requirements": {
+                    "type": "string"
+                  },
+                  "restrictions": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Listing created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "listing": {
+                      "$ref": "#/components/schemas/Listing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not channel owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/listings/my": {
+      "get": {
+        "tags": [
+          "Listings"
+        ],
+        "summary": "Get current user's listings",
+        "description": "Returns all listings owned by the authenticated user",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listings retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "listings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Listing"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/listings/{id}": {
+      "get": {
+        "tags": [
+          "Listings"
+        ],
+        "summary": "Get listing details",
+        "description": "Returns detailed information about a specific listing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Listing ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listing retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "listing": {
+                      "$ref": "#/components/schemas/Listing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Listing not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Listings"
+        ],
+        "summary": "Update listing",
+        "description": "Updates listing information (owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Listing ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "customPrice": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "PAUSED",
+                      "REMOVED"
+                    ]
+                  },
+                  "requirements": {
+                    "type": "string"
+                  },
+                  "restrictions": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Listing updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "listing": {
+                      "$ref": "#/components/schemas/Listing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not listing owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Listing not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Listings"
+        ],
+        "summary": "Remove listing",
+        "description": "Marks listing as removed (owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Listing ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listing removed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not listing owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Listing not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/me": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get current user profile",
+        "description": "Returns the authenticated user's complete profile including wallets and statistics",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User profile retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Update current user profile",
+        "description": "Updates the authenticated user's profile settings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "isAdvertiser": {
+                    "type": "boolean",
+                    "description": "Set user as advertiser"
+                  },
+                  "isChannelOwner": {
+                    "type": "boolean",
+                    "description": "Set user as channel owner"
+                  },
+                  "languageCode": {
+                    "type": "string",
+                    "description": "User's preferred language"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/complete-onboarding": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Complete user onboarding with role selection",
+        "description": "Sets user roles and marks onboarding as completed",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "isAdvertiser",
+                  "isChannelOwner"
+                ],
+                "properties": {
+                  "isAdvertiser": {
+                    "type": "boolean"
+                  },
+                  "isChannelOwner": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding completed successfully"
+          }
+        }
+      }
+    },
+    "/api/users/telegram-auth/status": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get Telegram account connection status",
+        "description": "Returns MTProto user session status for the authenticated user",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Telegram auth status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "telegramAuth": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users/telegram-auth/start": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Start Telegram account connection",
+        "description": "Sends verification code via Telegram app or SMS",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "phoneNumber"
+                ],
+                "properties": {
+                  "phoneNumber": {
+                    "type": "string"
+                  },
+                  "forceSms": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification code request result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "telegramAuth": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or request failed"
+          }
+        }
+      }
+    },
+    "/api/users/telegram-auth/code": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Submit Telegram verification code",
+        "description": "Verifies code and may transition to password-required state",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Code verification result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "telegramAuth": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired code"
+          }
+        }
+      }
+    },
+    "/api/users/telegram-auth/password": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Submit Telegram 2FA password",
+        "description": "Completes Telegram account connection when password is required",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password accepted, Telegram account connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "telegramAuth": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid password or session state"
+          }
+        }
+      }
+    },
+    "/api/users/telegram-auth/disconnect": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Disconnect Telegram account session",
+        "description": "Removes stored MTProto session for the authenticated user",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Telegram account disconnected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Disconnect failed"
+          }
+        }
+      }
+    },
+    "/api/users/{id}": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get public user profile",
+        "description": "Returns public information about a user including reviews and ratings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User profile retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}/reviews": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get user's reviews",
+        "description": "Returns paginated list of reviews for a specific user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User ID"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Page number"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reviews retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reviews": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

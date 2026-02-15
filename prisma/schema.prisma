@@ -1,0 +1,1391 @@
+// ============================================================================
+// Telegram Ads Marketplace - Database Schema
+// ============================================================================
+// Tech: PostgreSQL + Prisma ORM
+// Design principles:
+// - Soft deletes where appropriate (deletedAt)
+// - Audit timestamps on all tables
+// - Flexible JSONB for extensible data
+// - Proper indexing for common queries
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USERS & AUTHENTICATION
+// ============================================================================
+
+/// Core user entity - identified by Telegram ID
+model User {
+  id           String   @id @default(cuid())
+  telegramId   BigInt   @unique
+  username     String? // @username, can be null
+  firstName    String
+  lastName     String?
+  languageCode String?  @default("en")
+  isPremium    Boolean  @default(false)
+  photoUrl     String?
+
+  // Roles - user can be both advertiser and channel owner
+  isAdvertiser   Boolean @default(false)
+  isChannelOwner Boolean @default(false)
+
+  // Onboarding
+  onboardingCompletedAt DateTime?
+
+  // Wallet info (TON)
+  walletAddress     String?   @unique
+  walletConnectedAt DateTime?
+
+  // Status
+  isActive  Boolean @default(true)
+  isBanned  Boolean @default(false)
+  banReason String?
+
+  // Timestamps
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastActiveAt DateTime @default(now())
+
+  // Relations
+  ownedChannels      Channel[]
+  channelMemberships ChannelMember[]
+  advertiserDeals    Deal[]          @relation("AdvertiserDeals")
+  channelOwnerDeals  Deal[]          @relation("ChannelOwnerDeals")
+  dealChatsClosed    DealChatBridge[] @relation("DealChatClosedByUser")
+  briefs             Brief[]
+  briefSavedChannels BriefSavedChannel[]
+  wallets            UserWallet[]
+  telegramSession    UserTelegramSession?
+  notifications      Notification[]
+  reviews            Review[]        @relation("ReviewAuthor")
+  receivedReviews    Review[]        @relation("ReviewTarget")
+
+  @@index([telegramId])
+  @@index([walletAddress])
+  @@index([isAdvertiser, isChannelOwner])
+  @@map("users")
+}
+
+/// User's linked TON wallets (can have multiple)
+model UserWallet {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  address String  @unique
+  isMain  Boolean @default(false)
+  label   String? // "Personal", "Business", etc.
+
+  // Verification
+  verifiedAt     DateTime?
+  verificationTx String? // TX that verified ownership
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([address])
+  @@map("user_wallets")
+}
+
+/// Encrypted user MTProto authorization session for rich Telegram analytics access.
+model UserTelegramSession {
+  id String @id @default(cuid())
+
+  userId String @unique @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status String @default("PENDING_CODE")
+
+  phoneNumber String @map("phone_number")
+
+  // AES-GCM encrypted blobs
+  sessionEncrypted   String  @map("session_encrypted")
+  authStateEncrypted String? @map("auth_state_encrypted")
+
+  lastAuthorizedAt DateTime? @map("last_authorized_at")
+  lastError        String?   @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("user_telegram_sessions")
+}
+
+// ============================================================================
+// CHANNELS & LISTINGS
+// ============================================================================
+
+/// Telegram channel registered in the marketplace
+model Channel {
+  id             String  @id @default(cuid())
+  telegramChatId String  @unique // Telegram's chat ID (as string for compatibility)
+  username       String? @unique // @channel_username
+  title          String
+  description    String?
+
+  // Owner - primary owner who registered the channel
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id])
+
+  // Bot status
+  botAddedAt     DateTime?
+  botIsAdmin     Boolean   @default(false)
+  botPermissions Json? // Cached bot permissions
+
+  // Channel metadata
+  type       ChannelType @default(CHANNEL)
+  isPublic   Boolean     @default(true)
+  inviteLink String?
+
+  // Categories for filtering
+  categories ChannelCategory[]
+  language   String            @default("en")
+
+  // Verification & trust
+  isVerified Boolean   @default(false)
+  verifiedAt DateTime?
+
+  // Status
+  status       ChannelStatus @default(PENDING)
+  statusReason String?
+
+  // Timestamps
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Relations
+  members        ChannelMember[]
+  stats          ChannelStats[]
+  currentStats   ChannelStats?   @relation("CurrentStats", fields: [currentStatsId], references: [id])
+  currentStatsId String?         @unique
+  adFormats      AdFormat[]
+  listings       Listing[]
+  savedInBriefs  BriefSavedChannel[]
+  deals          Deal[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([language])
+  @@index([telegramChatId])
+  @@map("channels")
+}
+
+enum ChannelType {
+  CHANNEL // Broadcast channel
+  GROUP // Public group (future)
+  SUPERGROUP // Supergroup (future)
+}
+
+enum ChannelStatus {
+  PENDING // Awaiting bot addition
+  ACTIVE // Listed and active
+  PAUSED // Temporarily paused by owner
+  SUSPENDED // Suspended by admin
+  REMOVED // Removed from marketplace
+}
+
+/// Channel team members (PR managers, admins)
+model ChannelMember {
+  id        String  @id @default(cuid())
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role        ChannelMemberRole @default(MANAGER)
+  permissions Json // Granular permissions
+
+  // Telegram admin verification
+  telegramAdminVerifiedAt DateTime?
+
+  // Status
+  isActive  Boolean @default(true)
+  invitedBy String? // User ID who invited
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([channelId, userId])
+  @@index([userId])
+  @@map("channel_members")
+}
+
+enum ChannelMemberRole {
+  OWNER // Full control
+  ADMIN // Can manage deals, can't delete channel
+  MANAGER // Can negotiate and manage creatives
+  VIEWER // Read-only access to stats
+}
+
+/// Channel statistics snapshots
+model ChannelStats {
+  id        String  @id @default(cuid())
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  // Period tracking
+  periodStart DateTime? // Stats period start date
+  periodEnd   DateTime? // Stats period end date
+
+  // Subscriber metrics
+  subscriberCount         Int  // Current follower count
+  subscriberCountPrevious Int? // Previous period count (for trending)
+  subscriberGrowth7d      Int? // Net growth last 7 days
+  subscriberGrowth30d     Int? // Net growth last 30 days
+
+  // Post metrics (current period)
+  avgViewsPerPost      Int? // Average views per post
+  avgSharesPerPost     Int? // Average forwards/shares per post
+  avgReactionsPerPost  Int? // Average reactions per post
+
+  // Post metrics (previous period - for trending)
+  avgViewsPerPostPrev      Int?
+  avgSharesPerPostPrev     Int?
+  avgReactionsPerPostPrev  Int?
+
+  // Story metrics (current period)
+  avgViewsPerStory     Int? // Average views per story
+  avgSharesPerStory    Int? // Average shares per story
+  avgReactionsPerStory Int? // Average reactions per story
+
+  // Story metrics (previous period - for trending)
+  avgViewsPerStoryPrev     Int?
+  avgSharesPerStoryPrev    Int?
+  avgReactionsPerStoryPrev Int?
+
+  // Engagement rates
+  engagementRate      Float? // Post engagement: (reactions + shares) / views
+  storyEngagementRate Float? // Story engagement: (reactions + shares) / views
+
+  // Notification metrics (quality indicator)
+  notificationEnabledPart  Int?   // Number of subscribers with notifications on
+  notificationEnabledTotal Int?   // Total subscribers counted
+  notificationEnabledRate  Float? // Percentage: part/total (0.0-1.0)
+
+  // Audience insights
+  premiumPercent Float? // % of Telegram Premium users (not in MTProto yet)
+  languageStats  Json?  // Language distribution: { "en": 45.2, "ru": 30.1, ... }
+
+  // Data completeness tracking
+  schemaVersion     Int     @default(2) // Schema version for data structure
+  hasAsyncGraphs    Boolean @default(false) // Were async graphs loaded?
+  hasPostStats      Boolean @default(false) // Were per-post stats parsed?
+  hasSourceData     Boolean @default(false) // Were source graphs loaded?
+  partialDataReason String? // Explanation if data is incomplete
+
+  // Source of data
+  source  StatsSource @default(BOT_API)
+  rawData Json?       // Original API response for debugging
+
+  // Timestamps
+  fetchedAt DateTime @default(now())
+
+  // Current stats relation (reverse)
+  currentForChannel Channel? @relation("CurrentStats")
+
+  // Relations to graph data
+  graphs ChannelStatsGraph[]
+
+  // Indexes for efficient filtering
+  @@index([channelId, fetchedAt])
+  @@index([subscriberCount])
+  @@index([avgViewsPerPost])
+  @@index([engagementRate])
+  @@index([subscriberGrowth30d])
+  @@index([notificationEnabledRate])
+  @@index([source, fetchedAt])
+  @@map("channel_stats")
+}
+
+enum StatsSource {
+  BOT_API // Telegram Bot API
+  MTPROTO // MTProto API (richer stats)
+  TGSTAT // TGStat.ru API
+  MANUAL // Manually entered
+}
+
+/// Time-series graph data for channel statistics
+model ChannelStatsGraph {
+  id      String       @id @default(cuid())
+  statsId String
+  stats   ChannelStats @relation(fields: [statsId], references: [id], onDelete: Cascade)
+
+  graphType GraphType // Type of graph (growth, followers, interactions, etc.)
+
+  // Time range for this graph
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // Async graph handling
+  isAsync    Boolean   @default(false)
+  asyncToken String?   // Token for loading async graphs
+  loadedAt   DateTime? // When async graph was successfully loaded
+  loadError  String?   // Error if loading failed
+
+  // Time-series data points
+  // timestamps: Unix timestamps in milliseconds
+  // series: Array of data series, e.g., [{ key: "total", label: "Total followers", values: [100, 120, 150] }]
+  timestamps BigInt[] // X-axis timestamps
+  series     Json     // Y-axis data series
+
+  // Metadata
+  title       String?
+  xAxisFormat String? // "day", "hour", "month"
+  yAxisFormat String? // "number", "percent"
+  rawGraph    Json?   // Full graph response for debugging
+
+  createdAt DateTime @default(now())
+
+  @@index([statsId, graphType])
+  @@index([statsId, periodStart, periodEnd])
+  @@map("channel_stats_graphs")
+}
+
+enum GraphType {
+  // Synchronous (immediate, available from BroadcastStats)
+  GROWTH           // growthGraph - Overall follower growth trend
+  FOLLOWERS        // followersGraph - Joined vs left subscribers
+
+  // Asynchronous (token-based, requires separate API call)
+  INTERACTIONS     // interactionsGraph - Views/likes/comments over time
+  IV_INTERACTIONS  // ivInteractionsGraph - Instant View interactions
+  VIEWS_BY_SOURCE  // viewsBySourceGraph - Traffic sources for views
+  FOLLOWERS_BY_SOURCE // newFollowersBySourceGraph - Traffic sources for new followers
+  LANGUAGES        // languagesGraph - Language distribution over time
+  REACTIONS_BY_EMOTION // reactionsByEmotionGraph - Reaction types distribution
+  STORY_INTERACTIONS // storyInteractionsGraph - Story engagement over time
+  STORY_REACTIONS  // storyReactionsByEmotionGraph - Story reaction types
+  MUTE_GRAPH       // muteGraph - Muted subscribers over time
+  TOP_HOURS        // topHoursGraph - Best posting times
+}
+
+/// Categories for channels
+model ChannelCategory {
+  id       String  @id @default(cuid())
+  slug     String  @unique
+  name     String
+  nameRu   String? // Localized names
+  nameUk   String?
+  icon     String? // Emoji or icon identifier
+  parentId String?
+
+  parent   ChannelCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children ChannelCategory[] @relation("CategoryHierarchy")
+
+  channels Channel[]
+
+  createdAt DateTime @default(now())
+
+  @@index([parentId])
+  @@map("channel_categories")
+}
+
+// ============================================================================
+// AD FORMATS & LISTINGS
+// ============================================================================
+
+/// Ad format offered by a channel (post, story, repost, etc.)
+model AdFormat {
+  id        String  @id @default(cuid())
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  // Format details
+  type        AdFormatType @default(POST)
+  customType  String? // For OTHER type
+  name        String // Display name
+  description String?
+
+  // Pricing (in TON, stored as string for precision)
+  priceAmount   String // e.g., "10.5"
+  priceCurrency String @default("TON")
+
+  // Terms
+  durationHours Int         @default(24) // How long content stays up
+  maxLength     Int? // Character limit
+  mediaAllowed  MediaType[] @default([IMAGE, VIDEO])
+
+  // Availability
+  isActive       Boolean @default(true)
+  availableSlots Int? // null = unlimited
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  listings      Listing[]
+  listingOffers ListingFormatOffer[]
+  deals         Deal[]
+
+  @@index([channelId, isActive])
+  @@map("ad_formats")
+}
+
+enum AdFormatType {
+  POST // Regular post
+  STORY // Channel story (24h)
+  REPOST // Forward/repost from advertiser
+  PINNED // Pinned post
+  OTHER // Custom format
+}
+
+enum MediaType {
+  TEXT
+  IMAGE
+  VIDEO
+  GIF
+  DOCUMENT
+  AUDIO
+  POLL
+}
+
+/// Active listing (channel owner's offer to advertisers)
+model Listing {
+  id         String   @id @default(cuid())
+  channelId  String
+  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  adFormatId String
+  adFormat   AdFormat @relation(fields: [adFormatId], references: [id])
+
+  // Listing details
+  title       String
+  description String?
+
+  // Pricing override (if different from ad format)
+  customPrice    String?
+  customCurrency String?
+
+  // Scheduling preferences
+  availableFrom  DateTime?
+  availableTo    DateTime?
+  preferredTimes Json? // e.g., ["morning", "evening"]
+  blackoutDates  DateTime[]
+
+  // Requirements
+  requirements String? // What advertiser must provide
+  restrictions String? // What's not allowed
+
+  // Status
+  status ListingStatus @default(ACTIVE)
+
+  // Timestamps
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expiresAt DateTime?
+
+  // Relations
+  deals         Deal[]
+  formatOffers  ListingFormatOffer[]
+
+  @@index([channelId, status])
+  @@index([status, createdAt])
+  @@map("listings")
+}
+
+/// Multi-format pricing overrides for a listing
+model ListingFormatOffer {
+  id        String  @id @default(cuid())
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  adFormatId String
+  adFormat   AdFormat @relation(fields: [adFormatId], references: [id], onDelete: Cascade)
+
+  customPrice    String?
+  customCurrency String?
+  enabled        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([listingId, adFormatId])
+  @@index([listingId, enabled])
+  @@index([adFormatId])
+  @@map("listing_format_offers")
+}
+
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  SOLD_OUT
+  EXPIRED
+  REMOVED
+}
+
+// ============================================================================
+// ADVERTISER BRIEFS (Campaigns)
+// ============================================================================
+
+/// Advertiser's campaign brief / request
+model Brief {
+  id           String @id @default(cuid())
+  advertiserId String
+  advertiser   User   @relation(fields: [advertiserId], references: [id])
+
+  // Brief details
+  title       String
+  description String
+
+  // Ad format requirements
+  adFormatTypes          AdFormatType[] // Desired ad formats (POST, STORY, etc.)
+  customFormatDescription String? // Description when OTHER format is selected
+  channelsLimit          Int? // Max number of channels for campaign
+
+  // Targeting
+  targetCategories String[] // Category slugs
+  targetLanguages  String[]
+  minSubscribers   Int?
+  maxSubscribers   Int?
+  minAvgViews      Int?
+
+  // Budget
+  budgetMin   String? // Min budget per channel
+  budgetMax   String? // Max budget per channel
+  totalBudget String? // Total campaign budget
+  currency    String  @default("TON")
+
+  // Timeline
+  desiredStartDate DateTime?
+  desiredEndDate   DateTime?
+  flexibility      BriefFlexibility @default(FLEXIBLE)
+
+  // Creative
+  hasCreative        Boolean @default(false)
+  creativeGuidelines String?
+  sampleCreative     Json? // { text, mediaUrls }
+
+  // Status
+  status BriefStatus @default(ACTIVE)
+
+  // Timestamps
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expiresAt DateTime?
+
+  // Relations
+  applications BriefApplication[]
+  savedChannels BriefSavedChannel[]
+  deals        Deal[]
+
+  @@index([advertiserId, status])
+  @@index([status, createdAt])
+  @@map("briefs")
+}
+
+/// Advertiser shortlist of channels saved for a brief
+model BriefSavedChannel {
+  id           String @id @default(cuid())
+  briefId      String
+  brief        Brief  @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  channelId    String
+  channel      Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  advertiserId String
+  advertiser   User   @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+
+  @@unique([briefId, channelId])
+  @@index([briefId])
+  @@index([advertiserId])
+  @@index([channelId])
+  @@map("brief_saved_channels")
+}
+
+enum BriefFlexibility {
+  STRICT // Exact dates required
+  FLEXIBLE // Some flexibility
+  ANYTIME // No date preference
+}
+
+enum BriefStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  FULFILLED
+  CANCELLED
+  EXPIRED
+}
+
+/// Channel owner's application to a brief
+model BriefApplication {
+  id          String @id @default(cuid())
+  briefId     String
+  brief       Brief  @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  channelId   String
+  applicantId String // User ID of the applicant
+
+  // Application details
+  proposedPrice      String
+  proposedDate       DateTime?
+  pitch              String?   // Why this channel is a good fit
+  selectedAdFormatIds String[] @default([]) // Channel owner selected pricing options
+
+  // Status
+  status          ApplicationStatus @default(PENDING)
+  rejectionReason String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  deal Deal?
+
+  @@unique([briefId, channelId])
+  @@index([briefId, status])
+  @@index([applicantId])
+  @@map("brief_applications")
+}
+
+enum ApplicationStatus {
+  PENDING
+  SHORTLISTED
+  ACCEPTED // -> Creates Deal
+  REJECTED
+  WITHDRAWN
+}
+
+// ============================================================================
+// DEALS & ESCROW
+// ============================================================================
+
+/// Core deal entity - represents an agreement between advertiser and channel owner
+model Deal {
+  id         String @id @default(cuid())
+  dealNumber Int    @unique @default(autoincrement()) // Human-readable number
+
+  // Parties
+  advertiserId   String
+  advertiser     User    @relation("AdvertiserDeals", fields: [advertiserId], references: [id])
+  channelOwnerId String
+  channelOwner   User    @relation("ChannelOwnerDeals", fields: [channelOwnerId], references: [id])
+  channelId      String
+  channel        Channel @relation(fields: [channelId], references: [id])
+
+  // Origin - how the deal was initiated
+  origin        DealOrigin
+  listingId     String?
+  listing       Listing?          @relation(fields: [listingId], references: [id])
+  briefId       String?
+  brief         Brief?            @relation(fields: [briefId], references: [id])
+  applicationId String?           @unique
+  application   BriefApplication? @relation(fields: [applicationId], references: [id])
+
+  // Ad format
+  adFormatId String
+  adFormat   AdFormat @relation(fields: [adFormatId], references: [id])
+
+  // Agreed terms
+  agreedPrice   String // Total amount advertiser pays (in nanoTON)
+  currency      String @default("TON")
+  scheduledTime DateTime?
+  durationHours Int    @default(24)
+  postingMethod             PostingPlanMethod?
+  postingGuaranteeTermHours Int?
+  manualPostWindowHours     Int?
+  postingPlanAgreedAt       DateTime?
+
+  // Commission breakdown (calculated at deal acceptance)
+  platformFeeBps    Int     @default(500) // Basis points (500 = 5%)
+  platformFeeAmount String? // Calculated: agreedPrice * feeBps / 10000
+  publisherAmount   String? // Calculated: agreedPrice - platformFeeAmount
+
+  // Deal state
+  status        DealStatus @default(CREATED)
+  statusHistory Json       @default("[]") // Array of { status, timestamp, actor }
+
+  // Escrow
+  escrowStatus   EscrowStatus  @default(NONE)
+  escrowWalletId String?
+  escrowWallet   EscrowWallet? @relation(fields: [escrowWalletId], references: [id])
+  escrowAmount   String?
+  escrowTxHash   String? // Deposit transaction
+  releaseTxHash  String? // Release transaction
+
+  // Creative
+  creativeId String?   @unique
+  creative   Creative?
+
+  // Post verification
+  postedMessageId BigInt? // Telegram message ID
+  postedAt        DateTime?
+  verifiedAt      DateTime?
+  deletedAt       DateTime? // If post was deleted early
+
+  // Timestamps & timeouts
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  expiresAt   DateTime? // Auto-cancel if stuck
+  completedAt DateTime?
+
+  // Metadata
+  notes    String? // Internal notes
+  metadata Json? // Extensible data
+
+  // Relations
+  messages             DealMessage[]
+  dealChatBridge       DealChatBridge?
+  events               DealEvent[]
+  postingPlanProposals DealPostingPlanProposal[]
+  disputes             Dispute[]
+  reviews              Review[]
+
+  @@index([advertiserId, status])
+  @@index([channelOwnerId, status])
+  @@index([channelId, status])
+  @@index([status, createdAt])
+  @@index([escrowStatus])
+  @@map("deals")
+}
+
+enum DealOrigin {
+  LISTING // Advertiser responded to channel listing
+  BRIEF // Channel owner applied to advertiser brief
+  DIRECT // Direct deal (future)
+}
+
+enum DealStatus {
+  // Initial
+  CREATED // Deal created, awaiting response
+  NEGOTIATING // Terms being discussed
+
+  // Agreement
+  TERMS_AGREED // Both parties agreed on terms
+
+  // Payment
+  AWAITING_PAYMENT // Waiting for advertiser deposit
+  FUNDED // Escrow funded
+
+  // Creative
+  AWAITING_CREATIVE // Waiting for channel owner's draft
+  CREATIVE_SUBMITTED // Draft submitted
+  CREATIVE_REVISION // Advertiser requested changes
+  CREATIVE_APPROVED // Ready for posting
+  AWAITING_POSTING_PLAN // Waiting for posting plan proposal/approval
+  POSTING_PLAN_AGREED // Posting plan accepted
+
+  // Execution
+  AWAITING_MANUAL_POST // Reserved for future manual posting flow
+  SCHEDULED // Scheduled for posting
+  POSTING // Being posted (in progress)
+  POSTED // Posted, monitoring started
+
+  // Completion
+  VERIFIED // Post verified, ready for release
+  COMPLETED // Funds released, deal done
+
+  // Cancellation
+  CANCELLED // Cancelled by either party
+  EXPIRED // Timed out
+  REFUNDED // Funds returned to advertiser
+
+  // Disputes
+  DISPUTED // Under dispute
+  RESOLVED // Dispute resolved
+}
+
+enum EscrowStatus {
+  NONE // No escrow yet
+  PENDING // Awaiting deposit
+  HELD // Funds held in escrow
+  RELEASING // Release in progress
+  RELEASED // Funds released to channel owner
+  REFUNDING // Refund in progress
+  REFUNDED // Funds returned to advertiser
+  PARTIAL_REFUND // Partial refund (dispute resolution)
+}
+
+/// Creative content for a deal
+model Creative {
+  id     String @id @default(cuid())
+  dealId String @unique
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  // Content
+  text       String?
+  mediaUrls  String[]
+  mediaTypes MediaType[]
+  mediaMeta  Json      @default("[]")
+
+  // Formatting
+  parseMode String? @default("HTML") // HTML or Markdown
+  buttons   Json? // Inline keyboard buttons
+
+  // Version control
+  version          Int  @default(1)
+  previousVersions Json @default("[]")
+
+  // Status
+  status CreativeStatus @default(DRAFT)
+
+  // Feedback
+  feedback String? // Advertiser feedback
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  submittedAt DateTime?
+  approvedAt  DateTime?
+
+  @@map("creatives")
+}
+
+enum CreativeStatus {
+  DRAFT
+  SUBMITTED
+  REVISION_REQUESTED
+  APPROVED
+  POSTED
+}
+
+/// Messages within a deal (negotiation, updates)
+model DealMessage {
+  id       String @id @default(cuid())
+  dealId   String
+  deal     Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  senderId String
+
+  // Content
+  type     MessageType @default(TEXT)
+  content  String
+  metadata Json? // Additional data based on type
+
+  // Delivery
+  telegramMessageId BigInt? // If sent via bot
+
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  @@index([dealId, createdAt])
+  @@map("deal_messages")
+}
+
+enum MessageType {
+  TEXT
+  SYSTEM // System notification
+  PRICE_PROPOSAL // Price negotiation
+  TERMS_UPDATE // Terms change
+  CREATIVE_SUBMIT // Creative submission notification
+  APPROVAL // Approval notification
+}
+
+/// Deal events for audit trail
+model DealEvent {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  type      String // Event type identifier
+  actorId   String? // User who triggered the event
+  actorType ActorType @default(USER)
+
+  // Event data
+  fromStatus DealStatus?
+  toStatus   DealStatus?
+  data       Json? // Additional event data
+
+  createdAt DateTime @default(now())
+
+  @@index([dealId, createdAt])
+  @@map("deal_events")
+}
+
+model DealChatBridge {
+  id     String @id @default(cuid())
+  dealId String @unique
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  status DealChatStatus @default(PENDING_OPEN)
+
+  advertiserThreadId BigInt?
+  publisherThreadId  BigInt?
+
+  advertiserOpenedAt DateTime?
+  publisherOpenedAt  DateTime?
+
+  closedAt       DateTime?
+  closedByUserId String?
+  closedByUser   User?   @relation("DealChatClosedByUser", fields: [closedByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([advertiserThreadId])
+  @@index([publisherThreadId])
+  @@index([closedByUserId])
+  @@map("deal_chat_bridges")
+}
+
+model DealPostingPlanProposal {
+  id                   String @id @default(cuid())
+  dealId               String
+  deal                 Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  proposedBy           PostingPlanActor
+  method               PostingPlanMethod
+  scheduledAt          DateTime
+  windowHours          Int?
+  guaranteeTermHours   Int    @default(48)
+  status               PostingPlanProposalStatus @default(PENDING)
+  respondedAt          DateTime?
+  metadata             Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([dealId, createdAt])
+  @@index([dealId, status])
+  @@map("deal_posting_plan_proposals")
+}
+
+enum PostingPlanMethod {
+  AUTO
+  MANUAL
+}
+
+enum PostingPlanActor {
+  ADVERTISER
+  PUBLISHER
+}
+
+enum PostingPlanProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  COUNTERED
+}
+
+enum DealChatStatus {
+  PENDING_OPEN
+  ACTIVE
+  CLOSED
+}
+
+enum ActorType {
+  USER
+  SYSTEM
+  ADMIN
+}
+
+// ============================================================================
+// ESCROW & PAYMENTS
+// ============================================================================
+
+/// Escrow wallet for holding deal funds (per-deal wallet architecture)
+model EscrowWallet {
+  id String @id @default(cuid())
+
+  // Wallet details
+  address   String  @unique
+  publicKey String?
+
+  // Association
+  type   EscrowWalletType @default(DEAL)
+  dealId String? // For DEAL type
+  userId String? // For USER type
+
+  // Contract deployment info
+  contractAddress String? // Deployed Tact escrow contract address
+  deployTxHash    String? // Contract deployment transaction
+  isDeployed      Boolean @default(false)
+
+  // Status
+  status WalletStatus @default(ACTIVE)
+
+  // Balance tracking (cached, verify on-chain for accuracy)
+  cachedBalance String    @default("0")
+  lastSyncedAt  DateTime?
+
+  // Security
+  encryptedKey String? // Encrypted private key (if custodial)
+  keyVersion   Int     @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  deals        Deal[]
+  transactions Transaction[]
+
+  @@index([address])
+  @@index([type, status])
+  @@map("escrow_wallets")
+}
+
+enum EscrowWalletType {
+  HOT // Central hot wallet
+  DEAL // Per-deal wallet
+  USER // Per-user wallet
+}
+
+enum WalletStatus {
+  ACTIVE
+  LOCKED
+  RETIRED
+}
+
+/// Transaction record
+model Transaction {
+  id String @id @default(cuid())
+
+  // Reference
+  walletId String?
+  wallet   EscrowWallet? @relation(fields: [walletId], references: [id])
+  dealId   String?
+
+  // Transaction details
+  type   TransactionType
+  status TransactionStatus @default(PENDING)
+
+  // Amounts (in nanoTON for precision)
+  amount   String
+  fee      String?
+  currency String  @default("TON")
+
+  // Addresses
+  fromAddress String?
+  toAddress   String?
+
+  // Chain data
+  txHash      String? @unique
+  lt          BigInt? // Logical time
+  blockNumber BigInt?
+
+  // Idempotency
+  idempotencyKey String? @unique
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  confirmedAt DateTime?
+
+  // Error handling
+  errorMessage String?
+  retryCount   Int     @default(0)
+
+  @@index([walletId, createdAt])
+  @@index([dealId])
+  @@index([txHash])
+  @@index([status])
+  @@map("transactions")
+}
+
+enum TransactionType {
+  DEPOSIT // Advertiser deposits to escrow
+  RELEASE // Release to channel owner (minus fee)
+  REFUND // Refund to advertiser
+  PARTIAL_RELEASE // Partial release (dispute)
+  PARTIAL_REFUND // Partial refund (dispute)
+  PLATFORM_FEE // Platform fee extracted on release
+  GAS_TOPUP // Gas top-up to escrow/hot wallet
+  WITHDRAWAL // User withdraws from platform
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+// ============================================================================
+// DISPUTES & REVIEWS
+// ============================================================================
+
+/// Dispute for a deal
+model Dispute {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id])
+
+  // Parties
+  initiatorId   String
+  initiatorRole DisputeRole
+
+  // Dispute details
+  reason      DisputeReason
+  description String
+  evidence    Json? // URLs, screenshots, etc.
+
+  // Resolution
+  status     DisputeStatus @default(OPEN)
+  resolvedBy String? // Admin user ID
+  resolution String?
+
+  // Outcome
+  outcome                 DisputeOutcome?
+  advertiserRefundPercent Int? // 0-100
+
+  // Timestamps
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+
+  @@index([dealId])
+  @@index([status])
+  @@map("disputes")
+}
+
+enum DisputeRole {
+  ADVERTISER
+  CHANNEL_OWNER
+}
+
+enum DisputeReason {
+  POST_NOT_PUBLISHED
+  POST_DELETED_EARLY
+  POST_MODIFIED
+  WRONG_CONTENT
+  WRONG_TIME
+  STATS_MISLEADING
+  NON_RESPONSIVE
+  PAYMENT_ISSUE
+  OTHER
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  AWAITING_RESPONSE
+  RESOLVED
+  ESCALATED
+}
+
+enum DisputeOutcome {
+  FULL_REFUND
+  PARTIAL_REFUND
+  FULL_RELEASE
+  PARTIAL_RELEASE
+  CANCELLED
+}
+
+/// Reviews after deal completion
+model Review {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id])
+
+  // Parties
+  authorId String
+  author   User   @relation("ReviewAuthor", fields: [authorId], references: [id])
+  targetId String
+  target   User   @relation("ReviewTarget", fields: [targetId], references: [id])
+
+  // Review content
+  rating  Int // 1-5
+  comment String?
+
+  // Specific ratings (optional)
+  communicationRating Int?
+  qualityRating       Int?
+  timelinessRating    Int?
+
+  // Visibility
+  isPublic Boolean @default(true)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([dealId, authorId])
+  @@index([targetId, createdAt])
+  @@map("reviews")
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Content
+  type  NotificationType
+  title String
+  body  String
+  data  Json? // Additional data for deep linking
+
+  // Delivery
+  channel           NotificationChannel @default(TELEGRAM)
+  telegramMessageId BigInt?
+
+  // Status
+  sentAt DateTime?
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  // Deal lifecycle
+  DEAL_CREATED
+  DEAL_ACCEPTED
+  DEAL_FUNDED
+  CREATIVE_SUBMITTED
+  CREATIVE_APPROVED
+  CREATIVE_REVISION
+  POST_PUBLISHED
+  DEAL_COMPLETED
+  DEAL_CANCELLED
+
+  // Briefs
+  BRIEF_APPLICATION
+  APPLICATION_ACCEPTED
+  APPLICATION_REJECTED
+
+  // Payments
+  PAYMENT_RECEIVED
+  PAYMENT_RELEASED
+  PAYMENT_REFUNDED
+
+  // Disputes
+  DISPUTE_OPENED
+  DISPUTE_RESOLVED
+
+  // System
+  CHANNEL_VERIFIED
+  REVIEW_RECEIVED
+  SYSTEM_ALERT
+}
+
+enum NotificationChannel {
+  TELEGRAM
+  PUSH
+  EMAIL
+}
+
+// ============================================================================
+// SYSTEM & ADMIN
+// ============================================================================
+
+/// Platform configuration
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+/// Platform wallet addresses for different networks and purposes
+model PlatformWallet {
+  id String @id @default(cuid())
+
+  // Network identification
+  network NetworkType   @default(TESTNET)
+  purpose WalletPurpose
+
+  // Wallet details
+  address     String
+  label       String // "Fee Collection", "Gas/Deploy", etc.
+  description String?
+
+  // For hot wallets - encrypted key storage
+  encryptedKey String?
+  keyVersion   Int     @default(1)
+
+  // Monitoring
+  minBalance    String? // Alert if below this
+  cachedBalance String?
+  lastSyncedAt  DateTime?
+
+  // Status
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, purpose])
+  @@index([network, isActive])
+  @@map("platform_wallets")
+}
+
+enum NetworkType {
+  MAINNET
+  TESTNET
+}
+
+enum WalletPurpose {
+  FEE_COLLECTION // Receives platform fees from escrow releases
+  GAS_OPERATIONS // Hot wallet for gas/deployment costs
+  TREASURY // Cold storage for accumulated fees
+}
+
+/// Scheduled jobs tracking
+model ScheduledJob {
+  id          String  @id @default(cuid())
+  type        String // Job type identifier
+  referenceId String? // Related entity ID
+
+  // Schedule
+  scheduledFor DateTime
+
+  // Execution
+  status    JobStatus @default(PENDING)
+  attempts  Int       @default(0)
+  lastError String?
+
+  // Data
+  payload Json?
+  result  Json?
+
+  // Timestamps
+  createdAt  DateTime  @default(now())
+  executedAt DateTime?
+
+  @@index([type, status, scheduledFor])
+  @@index([referenceId])
+  @@map("scheduled_jobs")
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+/// Audit log for sensitive operations
+model AuditLog {
+  id String @id @default(cuid())
+
+  // Actor
+  actorId   String?
+  actorType ActorType
+  actorIp   String?
+
+  // Action
+  action     String
+  resource   String
+  resourceId String?
+
+  // Details
+  oldValue Json?
+  newValue Json?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([resource, resourceId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
