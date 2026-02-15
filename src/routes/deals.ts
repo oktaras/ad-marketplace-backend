@@ -410,10 +410,44 @@ function buildDealChatPayload(
   };
 }
 
-function toSerializableDeal(deal: any, userId: string) {
+function shouldRedactAdvertiserForViewer(
+  deal: {
+    advertiserId: string;
+    channelOwnerId: string;
+  },
+  userId: string,
+): boolean {
+  return deal.channelOwnerId === userId && deal.advertiserId !== userId;
+}
+
+function sanitizeAdvertiserPayload(
+  advertiser: {
+    id: string;
+    username?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    photoUrl?: string | null;
+  },
+  redact: boolean,
+) {
+  if (!redact) {
+    return advertiser;
+  }
+
+  return {
+    id: advertiser.id,
+    username: null,
+    firstName: null,
+    lastName: null,
+    photoUrl: null,
+  };
+}
+
+function toOverviewDeal(deal: any, userId: string) {
   const availableActions = dealService.getDealAvailableActions(deal, userId);
   const deadlines = dealService.getDealDeadlineInfo(deal);
   const dealChat = buildDealChatPayload(deal, userId);
+  const redactAdvertiser = shouldRedactAdvertiserForViewer(deal, userId);
 
   return {
     id: deal.id,
@@ -440,12 +474,9 @@ function toSerializableDeal(deal: any, userId: string) {
     expiresAt: deal.expiresAt,
     completedAt: deal.completedAt,
     channel: deal.channel,
-    advertiser: deal.advertiser,
-    channelOwner: deal.channelOwner,
+    advertiser: sanitizeAdvertiserPayload(deal.advertiser, redactAdvertiser),
     adFormat: deal.adFormat,
     brief: deal.brief,
-    creative: withSignedCreativeMediaUrls(deal.creative),
-    postingPlan: buildPostingPlanPayload(deal),
     dealChat,
     openDealChatUrl: buildOpenDealChatUrl(deal.id),
     availableActions,
@@ -453,6 +484,154 @@ function toSerializableDeal(deal: any, userId: string) {
     isAdvertiser: deal.advertiserId === userId,
     isPublisher: deal.channelOwnerId === userId,
   };
+}
+
+type DealActivityItemType = 'status' | 'creative' | 'plan' | 'system';
+
+type DealActivityItem = {
+  id: string;
+  timestamp: string;
+  actor: string;
+  type: DealActivityItemType;
+  title: string;
+  detail: string;
+};
+
+function toStatusLabel(status: string): string {
+  return status
+    .toLowerCase()
+    .split('_')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function toActivityTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+function buildDealActivityPayload(deal: {
+  id: string;
+  createdAt: Date;
+  statusHistory: unknown;
+  creative: null | {
+    id: string;
+    status: string;
+    submittedAt: Date | null;
+    approvedAt: Date | null;
+    updatedAt: Date;
+    feedback: string | null;
+  };
+  postingPlanProposals: Array<{
+    id: string;
+    proposedBy: PostingPlanActor;
+    method: PostingPlanMethod;
+    scheduledAt: Date;
+    guaranteeTermHours: number;
+    status: PostingPlanProposalStatus;
+    createdAt: Date;
+  }>;
+}): DealActivityItem[] {
+  const items: DealActivityItem[] = [
+    {
+      id: `system-created-${deal.id}`,
+      timestamp: deal.createdAt.toISOString(),
+      actor: 'SYSTEM',
+      type: 'system',
+      title: 'Deal Created',
+      detail: 'Deal was created and entered workflow.',
+    },
+  ];
+
+  if (Array.isArray(deal.statusHistory)) {
+    deal.statusHistory.forEach((entry, index) => {
+      if (!entry || typeof entry !== 'object') {
+        return;
+      }
+
+      const candidate = entry as { status?: unknown; timestamp?: unknown; actor?: unknown };
+      if (typeof candidate.status !== 'string') {
+        return;
+      }
+
+      const timestamp = toActivityTimestamp(candidate.timestamp);
+      if (!timestamp) {
+        return;
+      }
+
+      const actor = typeof candidate.actor === 'string' ? candidate.actor : 'SYSTEM';
+      items.push({
+        id: `status-${deal.id}-${index}-${timestamp}`,
+        timestamp,
+        actor,
+        type: 'status',
+        title: `Status: ${toStatusLabel(candidate.status)}`,
+        detail: 'Workflow status changed.',
+      });
+    });
+  }
+
+  if (deal.creative) {
+    const submittedAt = deal.creative.submittedAt?.toISOString();
+    if (submittedAt) {
+      items.push({
+        id: `creative-submitted-${deal.creative.id}`,
+        timestamp: submittedAt,
+        actor: 'PUBLISHER',
+        type: 'creative',
+        title: 'Creative Submitted',
+        detail: 'Publisher submitted creative for review.',
+      });
+    }
+
+    if (deal.creative.feedback) {
+      items.push({
+        id: `creative-feedback-${deal.creative.id}-${deal.creative.updatedAt.toISOString()}`,
+        timestamp: deal.creative.updatedAt.toISOString(),
+        actor: 'ADVERTISER',
+        type: 'creative',
+        title: 'Creative Revision Requested',
+        detail: deal.creative.feedback,
+      });
+    }
+
+    if (deal.creative.approvedAt) {
+      items.push({
+        id: `creative-approved-${deal.creative.id}`,
+        timestamp: deal.creative.approvedAt.toISOString(),
+        actor: 'ADVERTISER',
+        type: 'creative',
+        title: 'Creative Approved',
+        detail: 'Creative approved and moved to posting workflow.',
+      });
+    }
+  }
+
+  deal.postingPlanProposals.forEach((proposal) => {
+    items.push({
+      id: `plan-${proposal.id}`,
+      timestamp: proposal.createdAt.toISOString(),
+      actor: proposal.proposedBy === PostingPlanActor.ADVERTISER ? 'ADVERTISER' : 'PUBLISHER',
+      type: 'plan',
+      title: `Posting Plan ${toStatusLabel(proposal.status)}`,
+      detail: `Method: ${proposal.method}. Scheduled: ${proposal.scheduledAt.toISOString()}. Guarantee: ${proposal.guaranteeTermHours}h.`,
+    });
+  });
+
+  return items.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+}
+
+function assertDealPartyAccess(
+  deal: { advertiserId: string; channelOwnerId: string },
+  userId: string,
+): void {
+  if (deal.advertiserId !== userId && deal.channelOwnerId !== userId) {
+    throw new ForbiddenError('Not a party to this deal');
+  }
 }
 
 /**
@@ -613,14 +792,6 @@ router.get('/', telegramAuth, async (req, res, next) => {
               photoUrl: true,
             },
           },
-          channelOwner: {
-            select: {
-              id: true,
-              username: true,
-              firstName: true,
-              photoUrl: true,
-            },
-          },
           adFormat: {
             select: {
               id: true,
@@ -635,35 +806,6 @@ router.get('/', telegramAuth, async (req, res, next) => {
               id: true,
               title: true,
             },
-          },
-          creative: {
-            select: {
-              id: true,
-              text: true,
-              mediaUrls: true,
-              mediaTypes: true,
-              mediaMeta: true,
-              buttons: true,
-              status: true,
-              feedback: true,
-              version: true,
-              submittedAt: true,
-              approvedAt: true,
-              updatedAt: true,
-            },
-          },
-          postingPlanProposals: {
-            select: {
-              id: true,
-              proposedBy: true,
-              method: true,
-              scheduledAt: true,
-              windowHours: true,
-              guaranteeTermHours: true,
-              status: true,
-              createdAt: true,
-            },
-            orderBy: { createdAt: 'desc' },
           },
         },
       }),
@@ -687,7 +829,7 @@ router.get('/', telegramAuth, async (req, res, next) => {
     });
 
     res.json({
-      deals: deals.map((d: any) => toSerializableDeal(d, req.user!.id)),
+      deals: deals.map((d: any) => toOverviewDeal(d, req.user!.id)),
       pagination: {
         page: parsedPage,
         limit: parsedLimit,
@@ -1037,32 +1179,156 @@ router.get('/:id', telegramAuth, async (req, res, next) => {
   try {
     const deal = await prisma.deal.findUnique({
       where: { id: Array.isArray(req.params.id) ? req.params.id[0] : req.params.id },
-      include: {
-        channel: {
-          include: {
-            currentStats: true,
+      select: {
+        id: true,
+        dealNumber: true,
+        origin: true,
+        listingId: true,
+        briefId: true,
+        applicationId: true,
+        advertiserId: true,
+        channelOwnerId: true,
+        channelId: true,
+        adFormatId: true,
+        agreedPrice: true,
+        currency: true,
+        scheduledTime: true,
+        durationHours: true,
+        postingMethod: true,
+        postingGuaranteeTermHours: true,
+        manualPostWindowHours: true,
+        platformFeeBps: true,
+        platformFeeAmount: true,
+        publisherAmount: true,
+        status: true,
+        statusHistory: true,
+        escrowStatus: true,
+        createdAt: true,
+        updatedAt: true,
+        expiresAt: true,
+        completedAt: true,
+        dealChatBridge: {
+          select: {
+            status: true,
+            advertiserThreadId: true,
+            publisherThreadId: true,
           },
         },
-        adFormat: true,
+        channel: {
+          select: {
+            id: true,
+            username: true,
+            title: true,
+            categories: {
+              select: {
+                slug: true,
+                name: true,
+                icon: true,
+              },
+            },
+          },
+        },
+        adFormat: {
+          select: {
+            id: true,
+            type: true,
+            name: true,
+            priceAmount: true,
+            priceCurrency: true,
+          },
+        },
         advertiser: {
           select: {
             id: true,
             username: true,
             firstName: true,
-            lastName: true,
             photoUrl: true,
           },
         },
-        channelOwner: {
+        brief: {
           select: {
             id: true,
-            username: true,
-            firstName: true,
-            lastName: true,
-            photoUrl: true,
+            title: true,
           },
         },
-        creative: true,
+      },
+    });
+
+    if (!deal) {
+      throw new NotFoundError('Deal');
+    }
+
+    assertDealPartyAccess(deal, req.user!.id);
+
+    res.json({
+      deal: toOverviewDeal(deal, req.user!.id),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/creative', telegramAuth, async (req, res, next) => {
+  try {
+    const dealId = extractDealId(req.params);
+    const deal = await prisma.deal.findUnique({
+      where: { id: dealId },
+      select: {
+        id: true,
+        status: true,
+        advertiserId: true,
+        channelOwnerId: true,
+        creative: {
+          select: {
+            id: true,
+            text: true,
+            mediaUrls: true,
+            mediaTypes: true,
+            mediaMeta: true,
+            buttons: true,
+            status: true,
+            feedback: true,
+            version: true,
+            submittedAt: true,
+            approvedAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!deal) {
+      throw new NotFoundError('Deal');
+    }
+
+    assertDealPartyAccess(deal, req.user!.id);
+
+    res.json({
+      status: deal.status,
+      workflowStatus: deal.status,
+      creative: withSignedCreativeMediaUrls(deal.creative),
+      availableActions: dealService.getDealAvailableActions(deal, req.user!.id),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/finance', telegramAuth, async (req, res, next) => {
+  try {
+    const dealId = extractDealId(req.params);
+    const deal = await prisma.deal.findUnique({
+      where: { id: dealId },
+      select: {
+        id: true,
+        status: true,
+        advertiserId: true,
+        channelOwnerId: true,
+        agreedPrice: true,
+        currency: true,
+        platformFeeAmount: true,
+        publisherAmount: true,
+        escrowStatus: true,
         escrowWallet: {
           select: {
             id: true,
@@ -1072,30 +1338,73 @@ router.get('/:id', telegramAuth, async (req, res, next) => {
             cachedBalance: true,
           },
         },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 50,
-        },
-        dealChatBridge: {
+      },
+    });
+
+    if (!deal) {
+      throw new NotFoundError('Deal');
+    }
+
+    assertDealPartyAccess(deal, req.user!.id);
+
+    res.json({
+      status: deal.status,
+      workflowStatus: deal.status,
+      availableActions: dealService.getDealAvailableActions(deal, req.user!.id),
+      finance: {
+        agreedPrice: deal.agreedPrice,
+        currency: deal.currency,
+        platformFeeAmount: deal.platformFeeAmount,
+        publisherAmount: deal.publisherAmount,
+        escrowStatus: deal.escrowStatus,
+        escrowWallet: deal.escrowWallet,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/activity', telegramAuth, async (req, res, next) => {
+  try {
+    const dealId = extractDealId(req.params);
+    const deal = await prisma.deal.findUnique({
+      where: { id: dealId },
+      select: {
+        id: true,
+        createdAt: true,
+        status: true,
+        statusHistory: true,
+        advertiserId: true,
+        channelOwnerId: true,
+        creative: {
           select: {
+            id: true,
             status: true,
-            advertiserThreadId: true,
-            publisherThreadId: true,
+            submittedAt: true,
+            approvedAt: true,
+            updatedAt: true,
+            feedback: true,
           },
         },
-        disputes: true,
         postingPlanProposals: {
           select: {
             id: true,
             proposedBy: true,
             method: true,
             scheduledAt: true,
-            windowHours: true,
             guaranteeTermHours: true,
             status: true,
             createdAt: true,
           },
           orderBy: { createdAt: 'desc' },
+        },
+        disputes: {
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+          },
         },
       },
     });
@@ -1104,18 +1413,19 @@ router.get('/:id', telegramAuth, async (req, res, next) => {
       throw new NotFoundError('Deal');
     }
 
-    // Verify user is party to deal
-    if (deal.advertiserId !== req.user!.id && deal.channelOwnerId !== req.user!.id) {
-      throw new ForbiddenError('Not a party to this deal');
-    }
+    assertDealPartyAccess(deal, req.user!.id);
+
+    const activity = buildDealActivityPayload(deal);
+    const disputeSummary = {
+      total: deal.disputes.length,
+      active: deal.disputes.filter((entry) => entry.status !== 'RESOLVED').length,
+    };
 
     res.json({
-      deal: {
-        ...toSerializableDeal(deal, req.user!.id),
-        messages: deal.messages,
-        disputes: deal.disputes,
-        escrowWallet: deal.escrowWallet,
-      },
+      status: deal.status,
+      workflowStatus: deal.status,
+      activity,
+      disputeSummary,
     });
   } catch (error) {
     next(error);
