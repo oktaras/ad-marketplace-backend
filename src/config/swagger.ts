@@ -1,4 +1,6 @@
 import swaggerJSDoc from 'swagger-jsdoc';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from './index.js';
 
 const swaggerDefinition = {
@@ -240,9 +242,33 @@ const swaggerDefinition = {
   ],
 };
 
+function buildApiGlobs(): string[] {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const cwd = process.cwd();
+
+  // Support both:
+  // 1) service root = backend/ (cwd points to backend)
+  // 2) monorepo root deploys (cwd points to repo root, backend is nested)
+  const baseDirs = new Set([
+    cwd,
+    path.resolve(cwd, 'backend'),
+    path.resolve(moduleDir, '../..'),
+    path.resolve(moduleDir, '../../..'),
+  ]);
+
+  const globs: string[] = [];
+  for (const baseDir of baseDirs) {
+    globs.push(path.join(baseDir, 'src/routes/*.ts'));
+    globs.push(path.join(baseDir, 'src/routes/*.js'));
+    globs.push(path.join(baseDir, 'dist/routes/*.js'));
+  }
+
+  return globs;
+}
+
 const options: swaggerJSDoc.Options = {
   swaggerDefinition,
-  apis: ['./src/routes/*.ts', './src/routes/*.js'], // Path to the API routes
+  apis: buildApiGlobs(),
 };
 
 export const swaggerSpec = swaggerJSDoc(options);
