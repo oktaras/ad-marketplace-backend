@@ -4,7 +4,6 @@ import { redis } from '../lib/redis.js';
 import { setupEventListeners } from '../services/listeners.js';
 import { jobQueue, setupRecurringJobs, logQueueStatus } from '../services/jobs/index.js';
 import { registerJobProcessors } from '../services/jobs/processors.js';
-import { telegramBot } from '../services/telegram/bot.js';
 
 let workerRuntimeInitialized = false;
 let queueStatusInterval: NodeJS.Timeout | null = null;
@@ -24,7 +23,6 @@ export async function initializeWorkerRuntime(): Promise<void> {
     void logQueueStatus();
   }, 5 * 60 * 1000);
 
-  telegramBot.startBot();
   workerRuntimeInitialized = true;
 
   console.log('✅ Worker runtime initialized');

@@ -22,7 +22,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log('🚀 Starting unified worker process...');
+  console.log('🚀 Starting background worker process...');
   console.log(`📊 Environment: ${config.nodeEnv}`);
   console.log(`🌐 TON Network: ${config.tonNetwork}`);
 
