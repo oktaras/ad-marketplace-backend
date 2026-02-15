@@ -63,19 +63,6 @@ const swaggerDefinition = {
           isChannelOwner: { type: 'boolean' },
           walletAddress: { type: 'string', nullable: true },
           onboardingCompleted: { type: 'boolean' },
-          wallets: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string' },
-                address: { type: 'string' },
-                isMain: { type: 'boolean' },
-                label: { type: 'string', nullable: true },
-                verified: { type: 'boolean' },
-              },
-            },
-          },
           stats: {
             type: 'object',
             properties: {

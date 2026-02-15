@@ -19,7 +19,7 @@ const router = Router();
  *   get:
  *     tags: [Users]
  *     summary: Get current user profile
- *     description: Returns the authenticated user's complete profile including wallets and statistics
+ *     description: Returns the authenticated user's complete profile and statistics
  *     security:
  *       - BearerAuth: []
  *     responses:
@@ -43,15 +43,6 @@ router.get('/me', telegramAuth, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.id },
     include: {
-      wallets: {
-        select: {
-          id: true,
-          address: true,
-          isMain: true,
-          label: true,
-          verifiedAt: true,
-        },
-      },
       _count: {
         select: {
           ownedChannels: true,
@@ -78,13 +69,6 @@ router.get('/me', telegramAuth, async (req, res) => {
       walletAddress: user!.walletAddress,
       onboardingCompleted: !!user!.onboardingCompletedAt,
       createdAt: user!.createdAt,
-      wallets: user!.wallets.map((w: any) => ({
-        id: w.id,
-        address: w.address,
-        isMain: w.isMain,
-        label: w.label,
-        verified: !!w.verifiedAt,
-      })),
       stats: {
         channels: user!._count.ownedChannels,
         dealsAsAdvertiser: user!._count.advertiserDeals,

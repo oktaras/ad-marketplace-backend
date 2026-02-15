@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { telegramAuth, generateToken } from '../middleware/auth.js';
 import { ValidationError } from '../middleware/error.js';
 import { prisma } from '../lib/prisma.js';
-import { tonService } from '../services/ton/index.js';
 
 const router = Router();
 
@@ -113,12 +112,11 @@ router.post('/telegram', telegramAuth, async (req, res) => {
  *                 wallet:
  *                   type: object
  *                   properties:
- *                     id:
- *                       type: string
  *                     address:
  *                       type: string
- *                     isActive:
- *                       type: boolean
+ *                     connectedAt:
+ *                       type: string
+ *                       format: date-time
  *       400:
  *         description: Invalid request or wallet already connected
  *         content:
@@ -139,146 +137,43 @@ const connectWalletSchema = z.object({
 
 router.post('/wallet/connect', telegramAuth, async (req, res, next) => {
   try {
-    const { address } = connectWalletSchema.parse(req.body);
+    const { address: rawAddress } = connectWalletSchema.parse(req.body);
     const user = req.user!;
+    const address = rawAddress.trim();
 
-    // Check if address already connected to another user
-    const existing = await prisma.userWallet.findUnique({
-      where: { address },
+    if (!address) {
+      throw new ValidationError('Wallet address is required');
+    }
+
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        walletAddress: address,
+        id: { not: user.id },
+      },
+      select: { id: true },
     });
 
-    if (existing && existing.userId !== user.id) {
+    if (existingUser) {
       throw new ValidationError('Wallet already connected to another account');
     }
 
-    // Create or update wallet connection
-    const wallet = await prisma.userWallet.upsert({
-      where: { address },
-      update: {
-        userId: user.id,
-        isMain: true,
-      },
-      create: {
-        userId: user.id,
-        address,
-        isMain: true,
-      },
-    });
-
-    // Update user's primary wallet
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
         walletAddress: address,
         walletConnectedAt: new Date(),
       },
+      select: {
+        walletAddress: true,
+        walletConnectedAt: true,
+      },
     });
 
     res.json({
       wallet: {
-        id: wallet.id,
-        address: wallet.address,
-        isMain: wallet.isMain,
-        verified: !!wallet.verifiedAt,
+        address: updatedUser.walletAddress,
+        connectedAt: updatedUser.walletConnectedAt?.toISOString() ?? null,
       },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * @openapi
- * /api/auth/wallet/verify:
- *   post:
- *     tags: [Auth]
- *     summary: Verify wallet ownership via signature
- *     description: Verifies wallet ownership by validating a signature of a message
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - address
- *               - signature
- *               - message
- *             properties:
- *               address:
- *                 type: string
- *                 description: TON wallet address to verify
- *               signature:
- *                 type: string
- *                 description: Signed message signature
- *               message:
- *                 type: string
- *                 description: Original message that was signed
- *     responses:
- *       200:
- *         description: Wallet verified successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 verified:
- *                   type: boolean
- *       400:
- *         description: Invalid signature or wallet not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-const verifyWalletSchema = z.object({
-  address: z.string().min(1),
-  signature: z.string().min(1),
-  message: z.string().min(1),
-});
-
-router.post('/wallet/verify', telegramAuth, async (req, res, next) => {
-  try {
-    const { address, signature, message } = verifyWalletSchema.parse(req.body);
-    const user = req.user!;
-
-    // Find the wallet
-    const wallet = await prisma.userWallet.findFirst({
-      where: {
-        userId: user.id,
-        address,
-      },
-    });
-
-    if (!wallet) {
-      throw new ValidationError('Wallet not found');
-    }
-
-    // Verify signature
-    const isValid = await tonService.verifySignature(address, message, signature);
-
-    if (!isValid) {
-      throw new ValidationError('Invalid signature');
-    }
-
-    // Mark as verified
-    await prisma.userWallet.update({
-      where: { id: wallet.id },
-      data: {
-        verifiedAt: new Date(),
-      },
-    });
-
-    res.json({
-      verified: true,
     });
   } catch (error) {
     next(error);
@@ -326,34 +221,22 @@ router.post('/wallet/verify', telegramAuth, async (req, res, next) => {
  */
 router.delete('/wallet/:address', telegramAuth, async (req, res, next) => {
   try {
-    const address = typeof req.params.address === 'string' ? req.params.address : req.params.address[0];
+    const addressParam = typeof req.params.address === 'string' ? req.params.address : req.params.address[0];
     const user = req.user!;
+    const requestedAddress = addressParam.trim();
+    const linkedAddress = user.walletAddress?.trim() ?? null;
 
-    const wallet = await prisma.userWallet.findFirst({
-      where: {
-        userId: user.id,
-        address,
-      },
-    });
-
-    if (!wallet) {
+    if (!requestedAddress || !linkedAddress || linkedAddress.toLowerCase() !== requestedAddress.toLowerCase()) {
       throw new ValidationError('Wallet not found');
     }
 
-    await prisma.userWallet.delete({
-      where: { id: wallet.id },
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        walletAddress: null,
+        walletConnectedAt: null,
+      },
     });
-
-    // If this was the main wallet, clear user's wallet address
-    if (wallet.isMain) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          walletAddress: null,
-          walletConnectedAt: null,
-        },
-      });
-    }
 
     res.json({ success: true });
   } catch (error) {

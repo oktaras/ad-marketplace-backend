@@ -62,7 +62,6 @@ model User {
   dealChatsClosed    DealChatBridge[] @relation("DealChatClosedByUser")
   briefs             Brief[]
   briefSavedChannels BriefSavedChannel[]
-  wallets            UserWallet[]
   telegramSession    UserTelegramSession?
   notifications      Notification[]
   reviews            Review[]        @relation("ReviewAuthor")
@@ -72,28 +71,6 @@ model User {
   @@index([walletAddress])
   @@index([isAdvertiser, isChannelOwner])
   @@map("users")
-}
-
-/// User's linked TON wallets (can have multiple)
-model UserWallet {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  address String  @unique
-  isMain  Boolean @default(false)
-  label   String? // "Personal", "Business", etc.
-
-  // Verification
-  verifiedAt     DateTime?
-  verificationTx String? // TX that verified ownership
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId])
-  @@index([address])
-  @@map("user_wallets")
 }
 
 /// Encrypted user MTProto authorization session for rich Telegram analytics access.

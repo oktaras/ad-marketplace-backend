@@ -88,30 +88,6 @@
           "onboardingCompleted": {
             "type": "boolean"
           },
-          "wallets": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "address": {
-                  "type": "string"
-                },
-                "isMain": {
-                  "type": "boolean"
-                },
-                "label": {
-                  "type": "string",
-                  "nullable": true
-                },
-                "verified": {
-                  "type": "boolean"
-                }
-              }
-            }
-          },
           "stats": {
             "type": "object",
             "properties": {
@@ -1016,14 +992,12 @@
                     "wallet": {
                       "type": "object",
                       "properties": {
-                        "id": {
-                          "type": "string"
-                        },
                         "address": {
                           "type": "string"
                         },
-                        "isActive": {
-                          "type": "boolean"
+                        "connectedAt": {
+                          "type": "string",
+                          "format": "date-time"
                         }
                       }
                     }
@@ -1034,86 +1008,6 @@
           },
           "400": {
             "description": "Invalid request or wallet already connected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/auth/wallet/verify": {
-      "post": {
-        "tags": [
-          "Auth"
-        ],
-        "summary": "Verify wallet ownership via signature",
-        "description": "Verifies wallet ownership by validating a signature of a message",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "address",
-                  "signature",
-                  "message"
-                ],
-                "properties": {
-                  "address": {
-                    "type": "string",
-                    "description": "TON wallet address to verify"
-                  },
-                  "signature": {
-                    "type": "string",
-                    "description": "Signed message signature"
-                  },
-                  "message": {
-                    "type": "string",
-                    "description": "Original message that was signed"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Wallet verified successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "verified": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid signature or wallet not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -4284,7 +4178,7 @@
           "Users"
         ],
         "summary": "Get current user profile",
-        "description": "Returns the authenticated user's complete profile including wallets and statistics",
+        "description": "Returns the authenticated user's complete profile and statistics",
         "security": [
           {
             "BearerAuth": []
