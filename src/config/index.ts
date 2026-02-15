@@ -73,6 +73,22 @@ function parseCurrencyList(value: string | undefined): string[] {
   return Array.from(new Set(normalized));
 }
 
+function stripUrlCredentials(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
@@ -102,10 +118,12 @@ const defaultCurrency = (() => {
   return normalized;
 })();
 
-const s3Endpoint = process.env.AWS_ENDPOINT_URL || process.env.MEDIA_S3_ENDPOINT || '';
+const s3Endpoint = stripUrlCredentials(process.env.AWS_ENDPOINT_URL || process.env.MEDIA_S3_ENDPOINT || '');
 const s3Bucket = process.env.AWS_S3_BUCKET_NAME || process.env.MEDIA_S3_BUCKET || '';
-const s3PublicBaseUrl = process.env.MEDIA_S3_PUBLIC_BASE_URL
-  || (s3Endpoint && s3Bucket ? `${trimTrailingSlash(s3Endpoint)}/${encodeURIComponent(s3Bucket)}` : '');
+const s3PublicBaseUrl = stripUrlCredentials(
+  process.env.MEDIA_S3_PUBLIC_BASE_URL
+  || (s3Endpoint && s3Bucket ? `${trimTrailingSlash(s3Endpoint)}/${encodeURIComponent(s3Bucket)}` : ''),
+);
 
 export const config = {
   // Server

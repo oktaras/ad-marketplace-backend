@@ -16,6 +16,7 @@ async function loadValidatorWithEnv(overrides: Record<string, string | undefined
 
   return {
     validateSubmittedMediaUrl: module.validateSubmittedMediaUrl,
+    prepareUploads: module.prepareUploads,
     restore: () => {
       for (const [key, value] of previous.entries()) {
         if (value === undefined) {
@@ -67,6 +68,32 @@ describe('validateSubmittedMediaUrl', () => {
     const { validateSubmittedMediaUrl, restore } = await loadValidatorWithEnv({});
     try {
       expect(() => validateSubmittedMediaUrl('https://example.com/file.png')).toThrowError('Media URL host is not in the allowlist');
+    } finally {
+      restore();
+    }
+  });
+
+  it('strips credentials from derived s3 public url', async () => {
+    const { prepareUploads, restore } = await loadValidatorWithEnv({
+      MEDIA_STORAGE_DRIVER: 's3',
+      AWS_ENDPOINT_URL: 'https://access:secret@bucket-private.example.com',
+      AWS_S3_BUCKET_NAME: 'creative',
+      AWS_ACCESS_KEY_ID: 'AKIA_TEST',
+      AWS_SECRET_ACCESS_KEY: 'secret',
+    });
+    try {
+      const prepared = await prepareUploads('deal-1', [
+        {
+          clientId: 'client-1',
+          name: 'image.png',
+          mimeType: 'image/png',
+          sizeBytes: 1024,
+        },
+      ]);
+
+      expect(prepared).toHaveLength(1);
+      expect(prepared[0]?.publicUrl).toMatch(/^https:\/\/bucket-private\.example\.com\/creative\//);
+      expect(prepared[0]?.publicUrl).not.toContain('@');
     } finally {
       restore();
     }
