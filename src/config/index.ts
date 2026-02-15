@@ -42,6 +42,20 @@ function parseList(value: string | undefined, fallback: string[]): string[] {
   return parsed.length > 0 ? parsed : fallback;
 }
 
+function normalizeOrigin(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const url = new URL(trimmed);
+    return `${url.protocol}//${url.host}`.toLowerCase();
+  } catch {
+    return trimmed.replace(/\/+$/, '').toLowerCase();
+  }
+}
+
 function normalizeCurrencyCode(value: string): string {
   return value.trim().toUpperCase();
 }
@@ -91,7 +105,11 @@ export const config = {
   
   // Security
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
-  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173').split(','),
+  corsOrigins: Array.from(new Set(
+    parseList(process.env.CORS_ORIGINS, ['http://localhost:5173'])
+      .map(normalizeOrigin)
+      .filter(Boolean),
+  )),
 
   // Currency
   supportedCurrencies,

@@ -33,6 +33,8 @@ app.use(helmet());
 // CORS configuration
 app.use(cors({
   origin: (origin, callback) => {
+    const normalizedOrigin = origin ? origin.replace(/\/+$/, '').toLowerCase() : undefined;
+
     // In development, allow all origins including undefined (for Telegram WebApp)
     if (config.nodeEnv === 'development') {
       callback(null, true);
@@ -40,7 +42,7 @@ app.use(cors({
     }
 
     // In production, check against allowed origins
-    if (!origin || config.corsOrigins.includes(origin)) {
+    if (!origin || (normalizedOrigin && config.corsOrigins.includes(normalizedOrigin))) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
