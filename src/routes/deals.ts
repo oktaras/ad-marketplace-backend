@@ -52,92 +52,6 @@ function replaceUrlOrigin(urlString: string, newOrigin: string): string {
   }
 }
 
-function encodeStorageKeyForPath(storageKey: string): string {
-  return storageKey
-    .split('/')
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join('/');
-}
-
-function toS3ProxyUrl(requestBaseUrl: string, storageKey: string): string {
-  return `${requestBaseUrl}/api/media/s3/${encodeStorageKeyForPath(storageKey)}`;
-}
-
-function extractStorageKeyFromS3Url(url: string): string | null {
-  try {
-    const parsed = new URL(url);
-    const pathParts = parsed.pathname.split('/').filter(Boolean);
-    if (pathParts.length < 2) {
-      return null;
-    }
-
-    if (pathParts[0] !== config.media.s3.bucket) {
-      return null;
-    }
-
-    const key = decodeURIComponent(pathParts.slice(1).join('/'));
-    if (!key.startsWith('creative/')) {
-      return null;
-    }
-
-    return key;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeCreativeMediaUrlsForResponse(creative: any, requestBaseUrl?: string) {
-  if (!creative || !requestBaseUrl) {
-    return creative;
-  }
-
-  const normalizedBase = requestBaseUrl.replace(/\/+$/, '');
-  const mediaMetaInput = Array.isArray(creative.mediaMeta) ? creative.mediaMeta : [];
-  const mediaMeta = mediaMetaInput.map((entry: unknown) => {
-    if (!entry || typeof entry !== 'object') {
-      return entry;
-    }
-
-    const candidate = entry as Record<string, unknown>;
-    const provider = typeof candidate.provider === 'string' ? candidate.provider.toLowerCase() : '';
-    const rawUrl = typeof candidate.url === 'string' ? candidate.url : '';
-    const storageKeyValue = typeof candidate.storageKey === 'string' ? candidate.storageKey.trim() : '';
-    const storageKey = storageKeyValue || extractStorageKeyFromS3Url(rawUrl || '') || '';
-
-    if (provider !== 's3' || !storageKey) {
-      return entry;
-    }
-
-    return {
-      ...candidate,
-      storageKey,
-      url: toS3ProxyUrl(normalizedBase, storageKey),
-    };
-  });
-
-  const mediaUrlsInput = Array.isArray(creative.mediaUrls) ? creative.mediaUrls : [];
-  const mediaUrls = mediaUrlsInput.map((rawUrl: unknown, index: number) => {
-    const value = typeof rawUrl === 'string' ? rawUrl : '';
-    const meta = mediaMeta[index] as Record<string, unknown> | undefined;
-    const provider = typeof meta?.provider === 'string' ? meta.provider.toLowerCase() : '';
-    const storageKeyFromMeta = typeof meta?.storageKey === 'string' ? meta.storageKey.trim() : '';
-    const storageKey = storageKeyFromMeta || extractStorageKeyFromS3Url(value) || '';
-
-    if (provider === 's3' && storageKey) {
-      return toS3ProxyUrl(normalizedBase, storageKey);
-    }
-
-    return value;
-  });
-
-  return {
-    ...creative,
-    mediaMeta,
-    mediaUrls,
-  };
-}
-
 function getSingleParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) {
     return value[0] || '';
@@ -333,7 +247,7 @@ function buildDealChatPayload(
   };
 }
 
-function toSerializableDeal(deal: any, userId: string, requestBaseUrl?: string) {
+function toSerializableDeal(deal: any, userId: string) {
   const availableActions = dealService.getDealAvailableActions(deal, userId);
   const deadlines = dealService.getDealDeadlineInfo(deal);
   const dealChat = buildDealChatPayload(deal, userId);
@@ -367,7 +281,7 @@ function toSerializableDeal(deal: any, userId: string, requestBaseUrl?: string) 
     channelOwner: deal.channelOwner,
     adFormat: deal.adFormat,
     brief: deal.brief,
-    creative: normalizeCreativeMediaUrlsForResponse(deal.creative, requestBaseUrl),
+    creative: deal.creative,
     postingPlan: buildPostingPlanPayload(deal),
     dealChat,
     openDealChatUrl: buildOpenDealChatUrl(deal.id),
@@ -609,9 +523,8 @@ router.get('/', telegramAuth, async (req, res, next) => {
       statusCounts[entry.status] = entry._count._all;
     });
 
-    const requestBaseUrl = resolveRequestBaseUrl(req);
     res.json({
-      deals: deals.map((d: any) => toSerializableDeal(d, req.user!.id, requestBaseUrl)),
+      deals: deals.map((d: any) => toSerializableDeal(d, req.user!.id)),
       pagination: {
         page: parsedPage,
         limit: parsedLimit,
@@ -1035,7 +948,7 @@ router.get('/:id', telegramAuth, async (req, res, next) => {
 
     res.json({
       deal: {
-        ...toSerializableDeal(deal, req.user!.id, resolveRequestBaseUrl(req)),
+        ...toSerializableDeal(deal, req.user!.id),
         messages: deal.messages,
         disputes: deal.disputes,
         escrowWallet: deal.escrowWallet,
@@ -1525,13 +1438,6 @@ router.post('/:id/creative/media/prepare', telegramAuth, async (req, res, next) 
     const preparedFiles = await prepareUploads(deal.id, data.files);
     const requestBaseUrl = resolveRequestBaseUrl(req);
     const files = preparedFiles.map((entry) => {
-      if (entry.provider === 's3') {
-        return {
-          ...entry,
-          publicUrl: `${requestBaseUrl}/api/media/s3/${encodeStorageKeyForPath(entry.storageKey)}`,
-        };
-      }
-
       if (entry.provider !== 'local') {
         return entry;
       }
@@ -1683,9 +1589,8 @@ router.post('/:id/creative', telegramAuth, async (req, res, next) => {
       }));
     }
 
-    const requestBaseUrl = resolveRequestBaseUrl(req);
     mediaMeta.forEach((item) => {
-      validateSubmittedMediaUrl(item.url, item.provider || null, requestBaseUrl);
+      validateSubmittedMediaUrl(item.url, item.provider || null);
     });
 
     // Create or update creative

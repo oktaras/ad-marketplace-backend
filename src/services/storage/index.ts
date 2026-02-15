@@ -162,28 +162,7 @@ export function getLocalStorageProvider(): LocalStorageProvider {
   return localProvider;
 }
 
-export function getS3StorageProvider(): S3StorageProvider {
-  return s3Provider;
-}
-
-function isS3ProxyUrlForBase(url: URL, requestBaseUrl?: string): boolean {
-  if (!requestBaseUrl) {
-    return false;
-  }
-
-  try {
-    const base = new URL(requestBaseUrl);
-    if (url.origin.toLowerCase() !== base.origin.toLowerCase()) {
-      return false;
-    }
-
-    return url.pathname.startsWith('/api/media/s3/');
-  } catch {
-    return false;
-  }
-}
-
-export function validateSubmittedMediaUrl(url: string, providerHint?: string | null, requestBaseUrl?: string): void {
+export function validateSubmittedMediaUrl(url: string, providerHint?: string | null): void {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -203,7 +182,7 @@ export function validateSubmittedMediaUrl(url: string, providerHint?: string | n
   }
 
   if (providerHint === 's3') {
-    if (!s3Provider.isAllowedMediaUrl(parsed) && !isS3ProxyUrlForBase(parsed, requestBaseUrl)) {
+    if (!s3Provider.isAllowedMediaUrl(parsed)) {
       throw new ValidationError('Media URL is not allowed for s3 provider');
     }
     return;
@@ -213,7 +192,6 @@ export function validateSubmittedMediaUrl(url: string, providerHint?: string | n
   if (
     localProvider.isAllowedMediaUrl(parsed)
     || s3Provider.isAllowedMediaUrl(parsed)
-    || isS3ProxyUrlForBase(parsed, requestBaseUrl)
   ) {
     return;
   }

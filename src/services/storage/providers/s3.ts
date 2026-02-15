@@ -78,12 +78,7 @@ export class S3StorageProvider implements StorageProviderAdapter {
     }
   }
 
-  createPresignedGetUrl(storageKey: string, expiresInSeconds = 300): string {
-    const expiresIn = Math.max(1, Math.floor(expiresInSeconds));
-    return this.createPresignedUrl('GET', storageKey, expiresIn);
-  }
-
-  private createPresignedUrl(method: 'PUT' | 'GET', storageKey: string, expiresIn: number): string {
+  private createPresignedUrl(method: 'PUT', storageKey: string, expiresIn: number): string {
     const endpointUrl = new URL(this.options.endpoint);
     const now = new Date();
     const amzDate = formatAmzDate(now);

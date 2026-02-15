@@ -93,6 +93,15 @@ function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
+function joinUrl(base: string, ...parts: string[]): string {
+  const normalizedBase = trimTrailingSlash(base);
+  const suffix = parts
+    .map((part) => part.replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)
+    .join('/');
+  return suffix ? `${normalizedBase}/${suffix}` : normalizedBase;
+}
+
 const supportedCurrencies = (() => {
   const parsed = parseCurrencyList(process.env.SUPPORTED_CURRENCIES);
   return parsed.length > 0 ? parsed : ['TON'];
@@ -121,9 +130,16 @@ const defaultCurrency = (() => {
 const mediaPublicBaseUrl = stripUrlCredentials(
   process.env.MEDIA_PUBLIC_BASE_URL || `http://localhost:${parseNumber(process.env.PORT, 3000)}`,
 );
-const s3Endpoint = stripUrlCredentials(process.env.AWS_ENDPOINT_URL || process.env.MEDIA_S3_ENDPOINT || '');
-const s3Bucket = process.env.AWS_S3_BUCKET_NAME || process.env.MEDIA_S3_BUCKET || '';
-const s3PublicBaseUrl = `${trimTrailingSlash(mediaPublicBaseUrl)}/api/media/s3`;
+const s3Endpoint = stripUrlCredentials(
+  process.env.AWS_ENDPOINT_URL || '',
+);
+const s3Bucket = process.env.AWS_S3_BUCKET_NAME || '';
+const awsPublicEndpoint = stripUrlCredentials(process.env.AWS_PUBLIC_ENDPOINT_URL || '');
+const s3PublicEndpoint = awsPublicEndpoint
+  || s3Endpoint;
+const s3PublicBaseUrl = s3PublicEndpoint && s3Bucket
+  ? joinUrl(s3PublicEndpoint, encodeURIComponent(s3Bucket))
+  : '';
 
 export const config = {
   // Server
@@ -223,10 +239,10 @@ export const config = {
       endpoint: s3Endpoint,
       publicBaseUrl: s3PublicBaseUrl,
       bucket: s3Bucket,
-      region: process.env.AWS_DEFAULT_REGION || process.env.MEDIA_S3_REGION || 'auto',
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.MEDIA_S3_ACCESS_KEY_ID || '',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || process.env.MEDIA_S3_SECRET_ACCESS_KEY || '',
-      forcePathStyle: parseBoolean(process.env.MEDIA_S3_FORCE_PATH_STYLE, true),
+      region: process.env.AWS_DEFAULT_REGION || 'auto',
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+      forcePathStyle: parseBoolean(process.env.AWS_S3_FORCE_PATH_STYLE, true),
     },
   },
 } as const;
@@ -248,16 +264,29 @@ if (config.nodeEnv === 'production') {
 }
 
 if (config.media.driver === 's3') {
-  const required = [
-    'AWS_ENDPOINT_URL',
-    'AWS_S3_BUCKET_NAME',
-    'AWS_ACCESS_KEY_ID',
-    'AWS_SECRET_ACCESS_KEY',
-  ];
-
-  for (const key of required) {
-    if (!process.env[key]) {
-      throw new Error(`Missing required environment variable: ${key} (MEDIA_STORAGE_DRIVER=s3)`);
-    }
+  if (!config.media.s3.endpoint) {
+    throw new Error(
+      'Missing S3 endpoint (set AWS_ENDPOINT_URL) (MEDIA_STORAGE_DRIVER=s3)',
+    );
+  }
+  if (!config.media.s3.bucket) {
+    throw new Error(
+      'Missing S3 bucket (set AWS_S3_BUCKET_NAME) (MEDIA_STORAGE_DRIVER=s3)',
+    );
+  }
+  if (!config.media.s3.accessKeyId) {
+    throw new Error(
+      'Missing S3 access key id (set AWS_ACCESS_KEY_ID) (MEDIA_STORAGE_DRIVER=s3)',
+    );
+  }
+  if (!config.media.s3.secretAccessKey) {
+    throw new Error(
+      'Missing S3 secret access key (set AWS_SECRET_ACCESS_KEY) (MEDIA_STORAGE_DRIVER=s3)',
+    );
+  }
+  if (!config.media.s3.publicBaseUrl) {
+    throw new Error(
+      'Missing public S3 endpoint (set AWS_PUBLIC_ENDPOINT_URL or use a public AWS_ENDPOINT_URL) (MEDIA_STORAGE_DRIVER=s3)',
+    );
   }
 }

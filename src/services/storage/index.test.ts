@@ -44,9 +44,9 @@ describe('validateSubmittedMediaUrl', () => {
     }
   });
 
-  it('accepts s3 media url when provider hint is s3 and proxy origin matches request', async () => {
+  it('accepts s3 media url when provider hint is s3', async () => {
     const { validateSubmittedMediaUrl, restore } = await loadValidatorWithEnv({
-      MEDIA_PUBLIC_BASE_URL: 'https://api.example.com',
+      AWS_PUBLIC_ENDPOINT_URL: 'https://bucket-public.example.com',
       AWS_ENDPOINT_URL: 'https://bucket-private.example.com',
       AWS_S3_BUCKET_NAME: 'creative',
       AWS_ACCESS_KEY_ID: 'AKIA_TEST',
@@ -55,9 +55,8 @@ describe('validateSubmittedMediaUrl', () => {
     try {
       expect(() =>
         validateSubmittedMediaUrl(
-          'https://api.example.com/api/media/s3/creative/deal/file.png',
+          'https://bucket-public.example.com/creative/creative/deal/file.png',
           's3',
-          'https://api.example.com',
         ),
       ).not.toThrow();
     } finally {
@@ -93,7 +92,7 @@ describe('validateSubmittedMediaUrl', () => {
       ]);
 
       expect(prepared).toHaveLength(1);
-      expect(prepared[0]?.publicUrl).toMatch(/^http:\/\/localhost:3000\/api\/media\/s3\/creative\//);
+      expect(prepared[0]?.publicUrl).toMatch(/^https:\/\/bucket-private\.example\.com\/creative\//);
       expect(prepared[0]?.publicUrl).not.toContain('@');
     } finally {
       restore();
