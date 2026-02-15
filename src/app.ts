@@ -109,29 +109,38 @@ function resolvePublicBaseUrl(req: express.Request): string {
   return `${protocol}://${host}`;
 }
 
+function resolveBaseUrl(configuredBaseUrl: string | undefined, fallbackBaseUrl: string): string {
+  const normalizedFallback = fallbackBaseUrl.endsWith('/') ? fallbackBaseUrl : `${fallbackBaseUrl}/`;
+  const normalizedConfigured = configuredBaseUrl?.trim();
+
+  if (normalizedConfigured) {
+    try {
+      return new URL(normalizedConfigured, normalizedFallback).toString();
+    } catch {
+      // Fall back to request-derived URL when MINI_APP_BASE_URL is malformed.
+    }
+  }
+
+  return new URL('/', normalizedFallback).toString();
+}
+
+function resolveAppRoute(baseUrl: string, routePath: string): string {
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  return new URL(routePath, normalizedBase).toString();
+}
+
 app.get('/api/tonconnect-manifest.json', (req, res) => {
-  const baseUrl = resolvePublicBaseUrl(req);
+  const publicBaseUrl = resolvePublicBaseUrl(req);
+  const miniAppBaseUrl = resolveBaseUrl(config.miniAppBaseUrl, publicBaseUrl);
 
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.json({
-    url: baseUrl,
+    url: resolveAppRoute(miniAppBaseUrl, '/'),
     name: 'Ads Marketplace MVP Bot',
-    iconUrl: `${baseUrl}/api/tonconnect-icon.svg`,
-    termsOfUseUrl: `${baseUrl}/terms`,
-    privacyPolicyUrl: `${baseUrl}/privacy`,
+    iconUrl: resolveAppRoute(miniAppBaseUrl, '/tonconnect-icon.png'),
+    termsOfUseUrl: resolveAppRoute(miniAppBaseUrl, '/terms'),
+    privacyPolicyUrl: resolveAppRoute(miniAppBaseUrl, '/privacy'),
   });
-});
-
-app.get('/api/tonconnect-icon.svg', (_req, res) => {
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.type('image/svg+xml').send(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" fill="none">
-      <rect width="192" height="192" rx="48" fill="#0B84FF"/>
-      <path d="M96 36C83.2 36 73 46.2 73 59V112.3C73 122.1 78.9 131 87.9 134.8L96 138.3L104.1 134.8C113.1 131 119 122.1 119 112.3V59C119 46.2 108.8 36 96 36Z" fill="white"/>
-      <path d="M62 104.5C62 95.4 69.4 88 78.5 88H113.5C122.6 88 130 95.4 130 104.5C130 113.6 122.6 121 113.5 121H78.5C69.4 121 62 113.6 62 104.5Z" fill="#0B84FF"/>
-      <path d="M84 102L96 114L108 102" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>`,
-  );
 });
 
 // API Documentation
