@@ -73,6 +73,10 @@ function parseCurrencyList(value: string | undefined): string[] {
   return Array.from(new Set(normalized));
 }
 
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
 const supportedCurrencies = (() => {
   const parsed = parseCurrencyList(process.env.SUPPORTED_CURRENCIES);
   return parsed.length > 0 ? parsed : ['TON'];
@@ -97,6 +101,11 @@ const defaultCurrency = (() => {
 
   return normalized;
 })();
+
+const s3Endpoint = process.env.AWS_ENDPOINT_URL || process.env.MEDIA_S3_ENDPOINT || '';
+const s3Bucket = process.env.AWS_S3_BUCKET_NAME || process.env.MEDIA_S3_BUCKET || '';
+const s3PublicBaseUrl = process.env.MEDIA_S3_PUBLIC_BASE_URL
+  || (s3Endpoint && s3Bucket ? `${trimTrailingSlash(s3Endpoint)}/${encodeURIComponent(s3Bucket)}` : '');
 
 export const config = {
   // Server
@@ -181,7 +190,7 @@ export const config = {
   },
 
   media: {
-    driver: (process.env.MEDIA_STORAGE_DRIVER || 'local') as 'local' | 'vercel_blob',
+    driver: (process.env.MEDIA_STORAGE_DRIVER || 'local') as 'local' | 's3',
     maxFiles: parseNumber(process.env.MEDIA_MAX_FILES, 5),
     maxImageBytes: parseNumberMbToBytes(process.env.MEDIA_MAX_IMAGE_MB, 10),
     maxVideoBytes: parseNumberMbToBytes(process.env.MEDIA_MAX_VIDEO_MB, 50),
@@ -192,8 +201,14 @@ export const config = {
       signingSecret: process.env.MEDIA_UPLOAD_SIGNING_SECRET || process.env.JWT_SECRET || 'dev-media-upload-secret',
       uploadTokenTtlSeconds: parseNumber(process.env.MEDIA_UPLOAD_TOKEN_TTL_SECONDS, 600),
     },
-    vercelBlob: {
-      readWriteToken: process.env.BLOB_READ_WRITE_TOKEN || '',
+    s3: {
+      endpoint: s3Endpoint,
+      publicBaseUrl: s3PublicBaseUrl,
+      bucket: s3Bucket,
+      region: process.env.AWS_DEFAULT_REGION || process.env.MEDIA_S3_REGION || 'auto',
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.MEDIA_S3_ACCESS_KEY_ID || '',
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || process.env.MEDIA_S3_SECRET_ACCESS_KEY || '',
+      forcePathStyle: parseBoolean(process.env.MEDIA_S3_FORCE_PATH_STYLE, true),
     },
   },
 } as const;
@@ -214,6 +229,17 @@ if (config.nodeEnv === 'production') {
   }
 }
 
-if (config.media.driver === 'vercel_blob' && !config.media.vercelBlob.readWriteToken) {
-  throw new Error('Missing required environment variable: BLOB_READ_WRITE_TOKEN (MEDIA_STORAGE_DRIVER=vercel_blob)');
+if (config.media.driver === 's3') {
+  const required = [
+    'AWS_ENDPOINT_URL',
+    'AWS_S3_BUCKET_NAME',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+  ];
+
+  for (const key of required) {
+    if (!process.env[key]) {
+      throw new Error(`Missing required environment variable: ${key} (MEDIA_STORAGE_DRIVER=s3)`);
+    }
+  }
 }

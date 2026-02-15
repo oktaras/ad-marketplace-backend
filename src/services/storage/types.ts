@@ -1,4 +1,4 @@
-export type StorageProvider = 'local' | 'vercel_blob';
+export type StorageProvider = 'local' | 's3';
 
 export type CreativeMediaType = 'IMAGE' | 'VIDEO' | 'GIF' | 'DOCUMENT' | 'AUDIO';
 

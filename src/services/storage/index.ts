@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { config } from '../../config/index.js';
 import { ValidationError } from '../../middleware/error.js';
 import { LocalStorageProvider } from './providers/local.js';
-import { VercelBlobStorageProvider } from './providers/vercelBlob.js';
+import { S3StorageProvider } from './providers/s3.js';
 import type {
   CreativeMediaMeta,
   CreativeMediaType,
@@ -26,15 +26,22 @@ const localProvider = new LocalStorageProvider({
   uploadTokenTtlSeconds: config.media.local.uploadTokenTtlSeconds,
 });
 
-const vercelBlobProvider = new VercelBlobStorageProvider({
-  readWriteToken: config.media.vercelBlob.readWriteToken,
+const s3Provider = new S3StorageProvider({
+  endpoint: config.media.s3.endpoint,
+  region: config.media.s3.region,
+  bucket: config.media.s3.bucket,
+  accessKeyId: config.media.s3.accessKeyId,
+  secretAccessKey: config.media.s3.secretAccessKey,
+  publicBaseUrl: config.media.s3.publicBaseUrl,
+  forcePathStyle: config.media.s3.forcePathStyle,
   uploadTokenTtlSeconds: config.media.local.uploadTokenTtlSeconds,
 });
 
 function getProvider(): StorageProviderAdapter {
-  if (config.media.driver === 'vercel_blob') {
-    return vercelBlobProvider;
+  if (config.media.driver === 's3') {
+    return s3Provider;
   }
+
   return localProvider;
 }
 
@@ -174,14 +181,18 @@ export function validateSubmittedMediaUrl(url: string, providerHint?: string | n
     return;
   }
 
-  if (providerHint === 'vercel_blob') {
-    if (!vercelBlobProvider.isAllowedMediaUrl(parsed)) {
-      throw new ValidationError('Media URL is not allowed for vercel blob provider');
+  if (providerHint === 's3') {
+    if (!s3Provider.isAllowedMediaUrl(parsed)) {
+      throw new ValidationError('Media URL is not allowed for s3 provider');
     }
     return;
   }
 
-  if (localProvider.isAllowedMediaUrl(parsed) || vercelBlobProvider.isAllowedMediaUrl(parsed)) {
+
+  if (
+    localProvider.isAllowedMediaUrl(parsed)
+    || s3Provider.isAllowedMediaUrl(parsed)
+  ) {
     return;
   }
 
