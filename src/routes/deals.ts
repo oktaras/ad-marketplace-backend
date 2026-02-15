@@ -109,52 +109,99 @@ function withSignedCreativeMediaUrls(creative: unknown): unknown {
   }
 
   const source = creative as Record<string, unknown>;
-  if (!Array.isArray(source.media)) {
-    return creative;
-  }
-
-  let changed = false;
-  const signedMedia = source.media.map((item) => {
-    if (!item || typeof item !== 'object') {
-      return item;
+  const signCandidate = (candidate: {
+    url?: unknown;
+    storageKey?: unknown;
+    provider?: unknown;
+  }): { url: string; storageKey: string } | null => {
+    const provider = typeof candidate.provider === 'string' ? candidate.provider.trim().toLowerCase() : '';
+    if (provider && provider !== 's3') {
+      return null;
     }
 
-    const mediaItem = item as Record<string, unknown>;
-    const fromField = typeof mediaItem.storageKey === 'string'
-      ? normalizeStorageKey(mediaItem.storageKey)
+    const fromField = typeof candidate.storageKey === 'string'
+      ? normalizeStorageKey(candidate.storageKey)
       : null;
-    const fromUrl = typeof mediaItem.url === 'string'
-      ? extractS3StorageKeyFromPublicUrl(mediaItem.url)
+    const fromUrl = typeof candidate.url === 'string'
+      ? extractS3StorageKeyFromPublicUrl(candidate.url)
       : null;
-    const provider = typeof mediaItem.provider === 'string' ? mediaItem.provider.trim().toLowerCase() : '';
-    const isExplicitS3 = provider === 's3';
-    if (!isExplicitS3 && !fromUrl) {
-      return item;
-    }
-
     const storageKey = fromField || fromUrl;
 
     if (!storageKey) {
-      return item;
-    }
-
-    if (provider && provider !== 's3') {
-      return item;
+      return null;
     }
 
     try {
-      const signedUrl = createPresignedS3ReadUrl(storageKey, config.media.s3.readUrlTtlSeconds);
+      return {
+        url: createPresignedS3ReadUrl(storageKey, config.media.s3.readUrlTtlSeconds),
+        storageKey,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  let changed = false;
+
+  const signedMedia = Array.isArray(source.media)
+    ? source.media.map((item) => {
+      if (!item || typeof item !== 'object') {
+        return item;
+      }
+
+      const mediaItem = item as Record<string, unknown>;
+      const signed = signCandidate(mediaItem);
+      if (!signed) {
+        return item;
+      }
+
       changed = true;
       return {
         ...mediaItem,
         provider: 's3',
-        storageKey,
-        url: signedUrl,
+        storageKey: signed.storageKey,
+        url: signed.url,
       };
-    } catch {
-      return item;
-    }
-  });
+    })
+    : source.media;
+
+  const signedMediaMeta = Array.isArray(source.mediaMeta)
+    ? source.mediaMeta.map((item) => {
+      if (!item || typeof item !== 'object') {
+        return item;
+      }
+
+      const mediaMetaItem = item as Record<string, unknown>;
+      const signed = signCandidate(mediaMetaItem);
+      if (!signed) {
+        return item;
+      }
+
+      changed = true;
+      return {
+        ...mediaMetaItem,
+        provider: 's3',
+        storageKey: signed.storageKey,
+        url: signed.url,
+      };
+    })
+    : source.mediaMeta;
+
+  const signedMediaUrls = Array.isArray(source.mediaUrls)
+    ? source.mediaUrls.map((value) => {
+      if (typeof value !== 'string') {
+        return value;
+      }
+
+      const signed = signCandidate({ url: value });
+      if (!signed) {
+        return value;
+      }
+
+      changed = true;
+      return signed.url;
+    })
+    : source.mediaUrls;
 
   if (!changed) {
     return creative;
@@ -163,6 +210,8 @@ function withSignedCreativeMediaUrls(creative: unknown): unknown {
   return {
     ...source,
     media: signedMedia,
+    mediaMeta: signedMediaMeta,
+    mediaUrls: signedMediaUrls,
   };
 }
 
