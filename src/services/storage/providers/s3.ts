@@ -33,7 +33,7 @@ export class S3StorageProvider implements StorageProviderAdapter {
 
   async prepareUpload(input: UploadPrepareFileInput): Promise<PreparedUpload> {
     const expiresIn = Math.max(1, this.options.uploadTokenTtlSeconds || 600);
-    const uploadUrl = this.createPresignedPutUrl(input.storageKey, expiresIn);
+    const uploadUrl = this.createPresignedUrl('PUT', input.storageKey, expiresIn);
     const publicBase = normalizeBaseUrl(this.options.publicBaseUrl);
     const publicUrl = `${publicBase}/${encodeStorageKey(input.storageKey)}`;
     const expiresAt = Date.now() + (expiresIn * 1000);
@@ -78,7 +78,12 @@ export class S3StorageProvider implements StorageProviderAdapter {
     }
   }
 
-  private createPresignedPutUrl(storageKey: string, expiresIn: number): string {
+  createPresignedGetUrl(storageKey: string, expiresInSeconds = 300): string {
+    const expiresIn = Math.max(1, Math.floor(expiresInSeconds));
+    return this.createPresignedUrl('GET', storageKey, expiresIn);
+  }
+
+  private createPresignedUrl(method: 'PUT' | 'GET', storageKey: string, expiresIn: number): string {
     const endpointUrl = new URL(this.options.endpoint);
     const now = new Date();
     const amzDate = formatAmzDate(now);
@@ -110,7 +115,7 @@ export class S3StorageProvider implements StorageProviderAdapter {
     const payloadHash = 'UNSIGNED-PAYLOAD';
 
     const canonicalRequest = [
-      'PUT',
+      method,
       canonicalUri,
       canonicalQueryString,
       canonicalHeaders,

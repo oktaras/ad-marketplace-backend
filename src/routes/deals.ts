@@ -52,6 +52,14 @@ function replaceUrlOrigin(urlString: string, newOrigin: string): string {
   }
 }
 
+function encodeStorageKeyForPath(storageKey: string): string {
+  return storageKey
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
 function getSingleParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) {
     return value[0] || '';
@@ -1438,6 +1446,13 @@ router.post('/:id/creative/media/prepare', telegramAuth, async (req, res, next) 
     const preparedFiles = await prepareUploads(deal.id, data.files);
     const requestBaseUrl = resolveRequestBaseUrl(req);
     const files = preparedFiles.map((entry) => {
+      if (entry.provider === 's3') {
+        return {
+          ...entry,
+          publicUrl: `${requestBaseUrl}/api/media/s3/${encodeStorageKeyForPath(entry.storageKey)}`,
+        };
+      }
+
       if (entry.provider !== 'local') {
         return entry;
       }
@@ -1589,8 +1604,9 @@ router.post('/:id/creative', telegramAuth, async (req, res, next) => {
       }));
     }
 
+    const requestBaseUrl = resolveRequestBaseUrl(req);
     mediaMeta.forEach((item) => {
-      validateSubmittedMediaUrl(item.url, item.provider || null);
+      validateSubmittedMediaUrl(item.url, item.provider || null, requestBaseUrl);
     });
 
     // Create or update creative

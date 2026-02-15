@@ -3,12 +3,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config/index.js';
 import { NotFoundError, ValidationError } from '../middleware/error.js';
-import { getLocalStorageProvider } from '../services/storage/index.js';
+import { getLocalStorageProvider, getS3StorageProvider } from '../services/storage/index.js';
 import { resolveLocalStoragePath, verifyLocalUploadToken } from '../services/storage/providers/local.js';
 
 const router = express.Router();
 const localProvider = getLocalStorageProvider();
+const s3Provider = getS3StorageProvider();
 const maxUploadBytes = Math.max(config.media.maxImageBytes, config.media.maxVideoBytes);
+const s3ReadUrlTtlSeconds = 300;
 
 function resolveRequestBaseUrl(req: express.Request): string {
   const forwardedProto = req.headers['x-forwarded-proto'];
@@ -28,6 +30,46 @@ function resolveRequestBaseUrl(req: express.Request): string {
 
   return `${protocol}://${host}`;
 }
+
+function extractStorageKeyFromRequest(req: express.Request): string {
+  const wildcard = typeof req.params[0] === 'string' ? req.params[0].trim() : '';
+  if (!wildcard) {
+    throw new ValidationError('Missing storage key');
+  }
+
+  let decoded = wildcard;
+  try {
+    decoded = decodeURIComponent(wildcard);
+  } catch {
+    throw new ValidationError('Invalid storage key encoding');
+  }
+
+  const normalized = decoded.replace(/^\/+/, '');
+  if (!normalized || normalized.includes('..') || normalized.includes('\\')) {
+    throw new ValidationError('Invalid storage key');
+  }
+
+  if (!normalized.startsWith('creative/')) {
+    throw new ValidationError('Unsupported storage key prefix');
+  }
+
+  return normalized;
+}
+
+router.get('/s3/*', async (req, res, next) => {
+  try {
+    if (config.media.driver !== 's3') {
+      throw new NotFoundError('Media object');
+    }
+
+    const storageKey = extractStorageKeyFromRequest(req);
+    const signedUrl = s3Provider.createPresignedGetUrl(storageKey, s3ReadUrlTtlSeconds);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.redirect(302, signedUrl);
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.put(
   '/local/:uploadId',

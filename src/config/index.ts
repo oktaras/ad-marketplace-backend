@@ -118,12 +118,12 @@ const defaultCurrency = (() => {
   return normalized;
 })();
 
+const mediaPublicBaseUrl = stripUrlCredentials(
+  process.env.MEDIA_PUBLIC_BASE_URL || `http://localhost:${parseNumber(process.env.PORT, 3000)}`,
+);
 const s3Endpoint = stripUrlCredentials(process.env.AWS_ENDPOINT_URL || process.env.MEDIA_S3_ENDPOINT || '');
 const s3Bucket = process.env.AWS_S3_BUCKET_NAME || process.env.MEDIA_S3_BUCKET || '';
-const s3PublicBaseUrl = stripUrlCredentials(
-  process.env.MEDIA_S3_PUBLIC_BASE_URL
-  || (s3Endpoint && s3Bucket ? `${trimTrailingSlash(s3Endpoint)}/${encodeURIComponent(s3Bucket)}` : ''),
-);
+const s3PublicBaseUrl = `${trimTrailingSlash(mediaPublicBaseUrl)}/api/media/s3`;
 
 export const config = {
   // Server
@@ -215,7 +215,7 @@ export const config = {
     allowedMime: parseList(process.env.MEDIA_ALLOWED_MIME, ['image/*', 'video/*']),
     local: {
       dir: process.env.MEDIA_LOCAL_DIR || '.uploads',
-      publicBaseUrl: process.env.MEDIA_PUBLIC_BASE_URL || `http://localhost:${parseNumber(process.env.PORT, 3000)}`,
+      publicBaseUrl: mediaPublicBaseUrl,
       signingSecret: process.env.MEDIA_UPLOAD_SIGNING_SECRET || process.env.JWT_SECRET || 'dev-media-upload-secret',
       uploadTokenTtlSeconds: parseNumber(process.env.MEDIA_UPLOAD_TOKEN_TTL_SECONDS, 600),
     },
