@@ -344,11 +344,24 @@ async function canDeliverToThread(chatId: bigint, threadId: bigint): Promise<boo
           disable_notification: true,
         } as any,
       ),
-    }) as { message_id?: number };
+    });
+    const probePayload = probe as unknown as Record<string, unknown>;
 
-    if (typeof probe.message_id === 'number' && Number.isFinite(probe.message_id)) {
+    const deliveredThreadId = extractIncomingThreadId(probePayload);
+    const deliveredToExpectedThread = deliveredThreadId !== null && deliveredThreadId === threadId;
+    if (!deliveredToExpectedThread) {
+      console.warn(
+        `[deal-chat] probe mismatch chatId=${chatId.toString()} expectedThreadId=${threadId.toString()} actualThreadId=${deliveredThreadId?.toString() ?? 'null'}`,
+      );
+      topicThreadParamPreference.delete(chatId.toString());
+    }
+
+    const probeMessageId = typeof probePayload.message_id === 'number' && Number.isFinite(probePayload.message_id)
+      ? probePayload.message_id
+      : null;
+    if (probeMessageId !== null) {
       try {
-        await bot.api.deleteMessage(chatId.toString(), probe.message_id);
+        await bot.api.deleteMessage(chatId.toString(), probeMessageId);
       } catch (cleanupError) {
         console.warn(
           `[deal-chat] probe cleanup failed chatId=${chatId.toString()} threadId=${threadId.toString()}`,
@@ -357,7 +370,7 @@ async function canDeliverToThread(chatId: bigint, threadId: bigint): Promise<boo
       }
     }
 
-    return true;
+    return deliveredToExpectedThread;
   } catch (error) {
     if (isMissingTopicError(error)) {
       return false;
