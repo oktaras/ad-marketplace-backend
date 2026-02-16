@@ -4,6 +4,8 @@ import { InputFile } from 'grammy';
 import { appEvents, AppEvent } from '../events.js';
 import { verifyAdminBeforeOperation } from './verification.js';
 import { dealService } from '../deal/index.js';
+import { config } from '../../config/index.js';
+import { createPresignedS3ReadUrl } from '../storage/index.js';
 
 export interface PostContent {
   text?: string;
@@ -15,6 +17,122 @@ export interface PostContent {
 }
 
 type TelegramMediaInput = InputFile | string;
+type CreativeMediaMetaEntry = {
+  url?: string;
+  type?: string;
+  provider?: string;
+  storageKey?: string;
+};
+
+function normalizeStorageKey(value: string): string | null {
+  const normalized = value.trim().replace(/^\/+/, '');
+  return normalized ? normalized : null;
+}
+
+function extractS3StorageKeyFromPublicUrl(urlString: string): string | null {
+  if (!config.media.s3.publicBaseUrl) {
+    return null;
+  }
+
+  try {
+    const mediaUrl = new URL(urlString);
+    const publicBase = new URL(config.media.s3.publicBaseUrl);
+    if (mediaUrl.origin.toLowerCase() !== publicBase.origin.toLowerCase()) {
+      return null;
+    }
+
+    const basePath = publicBase.pathname.replace(/\/+$/, '');
+    const prefix = basePath ? `${basePath}/` : '/';
+    if (!mediaUrl.pathname.startsWith(prefix)) {
+      return null;
+    }
+
+    const encodedKey = mediaUrl.pathname.slice(prefix.length);
+    if (!encodedKey) {
+      return null;
+    }
+
+    const decodedKey = encodedKey
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment);
+        } catch {
+          return segment;
+        }
+      })
+      .join('/');
+
+    return normalizeStorageKey(decodedKey);
+  } catch {
+    return null;
+  }
+}
+
+function parseCreativeMediaMeta(input: unknown): CreativeMediaMetaEntry[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((item): CreativeMediaMetaEntry | null => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const candidate = item as Record<string, unknown>;
+      const url = typeof candidate.url === 'string' && candidate.url.trim()
+        ? candidate.url.trim()
+        : undefined;
+      const type = typeof candidate.type === 'string' && candidate.type.trim()
+        ? candidate.type.trim()
+        : undefined;
+      const provider = typeof candidate.provider === 'string' && candidate.provider.trim()
+        ? candidate.provider.trim().toLowerCase()
+        : undefined;
+      const storageKey = typeof candidate.storageKey === 'string' && candidate.storageKey.trim()
+        ? candidate.storageKey.trim()
+        : undefined;
+
+      if (!url && !storageKey) {
+        return null;
+      }
+
+      return { url, type, provider, storageKey };
+    })
+    .filter((entry): entry is CreativeMediaMetaEntry => entry !== null);
+}
+
+function resolvePostingMediaUrl(candidate: CreativeMediaMetaEntry | undefined): string | undefined {
+  if (!candidate?.url) {
+    return undefined;
+  }
+
+  // For private S3 buckets, convert stored public URL into a short-lived signed read URL.
+  if (config.media.driver === 's3') {
+    const provider = candidate.provider?.toLowerCase();
+    if (!provider || provider === 's3') {
+      const storageKey = (
+        (candidate.storageKey ? normalizeStorageKey(candidate.storageKey) : null)
+        || extractS3StorageKeyFromPublicUrl(candidate.url)
+      );
+
+      if (storageKey) {
+        try {
+          return createPresignedS3ReadUrl(storageKey, config.media.s3.readUrlTtlSeconds);
+        } catch (error) {
+          console.warn('[telegram-posting] failed to sign media URL, using original', {
+            storageKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+  }
+
+  return candidate.url;
+}
 
 function inferMediaTypeFromUrl(url?: string): PostContent['mediaType'] | undefined {
   if (!url) return undefined;
@@ -298,12 +416,25 @@ export async function publishDealCreative(dealId: string, creativeId: string): P
   await verifyAdminBeforeOperation(deal.channelId);
 
   try {
+    const mediaMeta = parseCreativeMediaMeta(creative.mediaMeta);
+    const firstMediaMeta = mediaMeta[0];
+    const mediaCandidate: CreativeMediaMetaEntry | undefined = firstMediaMeta
+      ? firstMediaMeta
+      : (creative.mediaUrls[0]
+        ? { url: creative.mediaUrls[0] }
+        : undefined);
+    const mediaUrl = resolvePostingMediaUrl(mediaCandidate);
+    const mediaType = normalizeMediaType(
+      firstMediaMeta?.type || creative.mediaTypes[0],
+      mediaUrl || mediaCandidate?.url,
+    );
+
     // Prepare post content
     const postContent: PostContent = {
       text: creative.text || undefined,
       caption: creative.text || undefined,
-      mediaUrl: creative.mediaUrls[0] || undefined,
-      mediaType: normalizeMediaType(creative.mediaTypes[0], creative.mediaUrls[0]),
+      mediaUrl,
+      mediaType,
       buttons: creative.buttons ? (creative.buttons as Array<{ text: string; url: string }>) : undefined,
       parseMode: 'HTML',
     };
