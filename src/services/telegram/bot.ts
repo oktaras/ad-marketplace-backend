@@ -1174,6 +1174,7 @@ async function ensureParticipantTopic(params: {
   side: DealChatParticipantSide;
   recreateOnUnreachable?: boolean;
   bypassRecentGraceWindow?: boolean;
+  forceCreateNewTopic?: boolean;
 }): Promise<{
   chatId: bigint;
   threadId: bigint;
@@ -1189,6 +1190,7 @@ async function ensureParticipantTopic(params: {
 
   const shouldRecreateOnUnreachable = params.recreateOnUnreachable ?? true;
   const bypassRecentGraceWindow = params.bypassRecentGraceWindow ?? false;
+  const forceCreateNewTopic = params.forceCreateNewTopic ?? false;
 
   for (let attempt = 1; attempt <= MAX_TOPIC_ENSURE_ATTEMPTS; attempt += 1) {
     const deal = await prisma.deal.findUnique({
@@ -1237,32 +1239,38 @@ async function ensureParticipantTopic(params: {
     }
 
     if (existingThreadId !== null) {
-      // For creation/recovery paths, verify real deliverability (send + cleanup probe),
-      // because chat-action checks can report false positives for deleted topics.
-      const reachable = shouldRecreateOnUnreachable
-        ? await canDeliverToThread(chatId, existingThreadId)
-        : await isThreadReachable(chatId, existingThreadId);
-      const withinRecentGraceWindow = !bypassRecentGraceWindow
-        && isRecentDateWithinMs(existingOpenedAt, TOPIC_RECENT_GRACE_MS);
-      if (!reachable && shouldRecreateOnUnreachable && withinRecentGraceWindow) {
-        return {
-          chatId,
-          threadId: existingThreadId,
-          recreated: false,
-          reachable: false,
-          status,
-          counterpartyThreadId,
-        };
-      }
-      if (reachable || !shouldRecreateOnUnreachable) {
-        return {
-          chatId,
-          threadId: existingThreadId,
-          recreated: false,
-          reachable,
-          status,
-          counterpartyThreadId,
-        };
+      if (forceCreateNewTopic) {
+        console.warn(
+          `[deal-chat] forced topic replacement dealId=${normalizedDealId} side=${params.side} existingThreadId=${existingThreadId.toString()}`,
+        );
+      } else {
+        // For creation/recovery paths, verify real deliverability (send + cleanup probe),
+        // because chat-action checks can report false positives for deleted topics.
+        const reachable = shouldRecreateOnUnreachable
+          ? await canDeliverToThread(chatId, existingThreadId)
+          : await isThreadReachable(chatId, existingThreadId);
+        const withinRecentGraceWindow = !bypassRecentGraceWindow
+          && isRecentDateWithinMs(existingOpenedAt, TOPIC_RECENT_GRACE_MS);
+        if (!reachable && shouldRecreateOnUnreachable && withinRecentGraceWindow) {
+          return {
+            chatId,
+            threadId: existingThreadId,
+            recreated: false,
+            reachable: false,
+            status,
+            counterpartyThreadId,
+          };
+        }
+        if (reachable || !shouldRecreateOnUnreachable) {
+          return {
+            chatId,
+            threadId: existingThreadId,
+            recreated: false,
+            reachable,
+            status,
+            counterpartyThreadId,
+          };
+        }
       }
     }
 
@@ -1360,6 +1368,7 @@ export async function openDealChatInPrivateTopic(params: {
   dealId: string;
   telegramUserId: ChatIdLike;
   forceRecovery?: boolean;
+  forceCreateNewTopic?: boolean;
 }) {
   const telegramUserId = parsePositiveBigInt(params.telegramUserId, 'telegramUserId');
   const initial = await dealChatService.openDealChatForUser({
@@ -1382,7 +1391,13 @@ export async function openDealChatInPrivateTopic(params: {
         `[deal-chat] open-flow manual forced recovery dealId=${params.dealId} side=${participantSide}`,
       );
       ensured = await ensureParticipantTopic(
-        buildRecoveryEnsureParticipantTopicParams(params.dealId, participantSide),
+        {
+          ...buildRecoveryEnsureParticipantTopicParams(params.dealId, participantSide),
+          ...(params.forceCreateNewTopic ? { forceCreateNewTopic: true } : {}),
+        },
+      );
+      console.warn(
+        `[deal-chat] open-flow manual forced recovery result dealId=${params.dealId} side=${participantSide} recreated=${ensured.recreated ? 'true' : 'false'} threadId=${ensured.threadId.toString()}`,
       );
     } else {
       ensured = await ensureParticipantTopic({
@@ -1566,6 +1581,7 @@ bot.command('repairchat', async (ctx) => {
       dealId,
       telegramUserId: ctx.from.id,
       forceRecovery: true,
+      forceCreateNewTopic: true,
     });
     const repairText = repaired.topicCreated
       ? 'Recovery action: topic recreated.'
