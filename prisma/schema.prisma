@@ -49,6 +49,12 @@ model User {
   isBanned  Boolean @default(false)
   banReason String?
 
+  // Notification preferences
+  notifyAdvertiserMessages Boolean @default(true)
+  notifyPublisherMessages  Boolean @default(true)
+  notifyPaymentMessages    Boolean @default(true)
+  notifySystemMessages     Boolean @default(true)
+
   // Timestamps
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

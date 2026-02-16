@@ -1135,6 +1135,34 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "minSubscribers",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maxSubscribers",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "minApplications",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maxApplications",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2239,6 +2267,41 @@
         "responses": {
           "202": {
             "description": "Channel stats refresh queued"
+          },
+          "403": {
+            "description": "Not channel owner"
+          },
+          "404": {
+            "description": "Channel not found"
+          }
+        }
+      }
+    },
+    "/api/channels/{id}/profile/refresh": {
+      "post": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Refresh channel profile metadata from Telegram (owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Channel ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel profile refreshed"
           },
           "403": {
             "description": "Not channel owner"
@@ -3767,6 +3830,48 @@
           },
           {
             "in": "query",
+            "name": "minSubscribers",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maxSubscribers",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "minViews",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maxViews",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "minEngagementRate",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maxEngagementRate",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "formatType",
             "schema": {
               "type": "string"
@@ -4194,6 +4299,29 @@
                   "properties": {
                     "user": {
                       "$ref": "#/components/schemas/User"
+                    },
+                    "notificationSettingsCatalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "templateIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -4241,6 +4369,23 @@
                   "languageCode": {
                     "type": "string",
                     "description": "User's preferred language"
+                  },
+                  "notificationSettings": {
+                    "type": "object",
+                    "properties": {
+                      "advertiserMessages": {
+                        "type": "boolean"
+                      },
+                      "publisherMessages": {
+                        "type": "boolean"
+                      },
+                      "paymentMessages": {
+                        "type": "boolean"
+                      },
+                      "systemMessages": {
+                        "type": "boolean"
+                      }
+                    }
                   }
                 }
               }

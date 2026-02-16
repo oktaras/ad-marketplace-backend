@@ -4,6 +4,10 @@ import { telegramAuth } from '../middleware/auth.js';
 import { prisma } from '../lib/prisma.js';
 import { NotFoundError, ValidationError } from '../middleware/error.js';
 import {
+  buildNotificationSettingsCatalog,
+  projectUserNotificationSettings,
+} from '../services/notifications/preferences.js';
+import {
   disconnectUserTelegramAuth,
   getUserTelegramAuthStatus,
   startUserTelegramAuth,
@@ -12,6 +16,13 @@ import {
 } from '../services/telegram/userAuth.js';
 
 const router = Router();
+
+const userNotificationSettingsUpdateSchema = z.object({
+  advertiserMessages: z.boolean().optional(),
+  publisherMessages: z.boolean().optional(),
+  paymentMessages: z.boolean().optional(),
+  systemMessages: z.boolean().optional(),
+}).strict();
 
 /**
  * @openapi
@@ -32,6 +43,21 @@ const router = Router();
  *               properties:
  *                 user:
  *                   $ref: '#/components/schemas/User'
+ *                 notificationSettingsCatalog:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       key:
+ *                         type: string
+ *                       title:
+ *                         type: string
+ *                       description:
+ *                         type: string
+ *                       templateIds:
+ *                         type: array
+ *                         items:
+ *                           type: string
  *       401:
  *         description: Unauthorized
  *         content:
@@ -68,6 +94,7 @@ router.get('/me', telegramAuth, async (req, res) => {
       isChannelOwner: user!.isChannelOwner,
       walletAddress: user!.walletAddress,
       onboardingCompleted: !!user!.onboardingCompletedAt,
+      notificationSettings: projectUserNotificationSettings(user!),
       createdAt: user!.createdAt,
       stats: {
         channels: user!._count.ownedChannels,
@@ -76,6 +103,7 @@ router.get('/me', telegramAuth, async (req, res) => {
         briefs: user!._count.briefs,
       },
     },
+    notificationSettingsCatalog: buildNotificationSettingsCatalog(),
   });
 });
 
@@ -104,6 +132,17 @@ router.get('/me', telegramAuth, async (req, res) => {
  *               languageCode:
  *                 type: string
  *                 description: User's preferred language
+ *               notificationSettings:
+ *                 type: object
+ *                 properties:
+ *                   advertiserMessages:
+ *                     type: boolean
+ *                   publisherMessages:
+ *                     type: boolean
+ *                   paymentMessages:
+ *                     type: boolean
+ *                   systemMessages:
+ *                     type: boolean
  *     responses:
  *       200:
  *         description: Profile updated successfully
@@ -123,7 +162,7 @@ router.get('/me', telegramAuth, async (req, res) => {
  */
 router.put('/me', telegramAuth, async (req, res, next) => {
   try {
-    const { isAdvertiser, isChannelOwner, languageCode } = req.body;
+    const { isAdvertiser, isChannelOwner, languageCode, notificationSettings } = req.body;
     const currentUser = req.user!;
 
     // If both flags are provided, user must keep at least one role enabled.
@@ -131,6 +170,15 @@ router.put('/me', telegramAuth, async (req, res, next) => {
       if (!isAdvertiser && !isChannelOwner) {
         return res.status(400).json({ error: 'User must have at least one role' });
       }
+    }
+
+    let parsedNotificationSettings: z.infer<typeof userNotificationSettingsUpdateSchema> | undefined;
+    if (notificationSettings !== undefined) {
+      const parseResult = userNotificationSettingsUpdateSchema.safeParse(notificationSettings);
+      if (!parseResult.success) {
+        throw new ValidationError('Invalid notificationSettings payload');
+      }
+      parsedNotificationSettings = parseResult.data;
     }
 
     const nextIsAdvertiser = typeof isAdvertiser === 'boolean' ? isAdvertiser : currentUser.isAdvertiser;
@@ -144,6 +192,18 @@ router.put('/me', telegramAuth, async (req, res, next) => {
         ...(typeof isAdvertiser === 'boolean' && { isAdvertiser }),
         ...(typeof isChannelOwner === 'boolean' && { isChannelOwner }),
         ...(languageCode && { languageCode }),
+        ...(typeof parsedNotificationSettings?.advertiserMessages === 'boolean' && {
+          notifyAdvertiserMessages: parsedNotificationSettings.advertiserMessages,
+        }),
+        ...(typeof parsedNotificationSettings?.publisherMessages === 'boolean' && {
+          notifyPublisherMessages: parsedNotificationSettings.publisherMessages,
+        }),
+        ...(typeof parsedNotificationSettings?.paymentMessages === 'boolean' && {
+          notifyPaymentMessages: parsedNotificationSettings.paymentMessages,
+        }),
+        ...(typeof parsedNotificationSettings?.systemMessages === 'boolean' && {
+          notifySystemMessages: parsedNotificationSettings.systemMessages,
+        }),
         ...(shouldMarkOnboardingCompletedAt && { onboardingCompletedAt: new Date() }),
       },
     });
@@ -155,6 +215,7 @@ router.put('/me', telegramAuth, async (req, res, next) => {
         isChannelOwner: user.isChannelOwner,
         languageCode: user.languageCode,
         onboardingCompleted: !!user.onboardingCompletedAt,
+        notificationSettings: projectUserNotificationSettings(user),
       },
     });
   } catch (error) {

@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { telegramBot } from './telegram/bot.js';
 import { buildTemplatedTelegramNotification, type NotificationActionContext } from './notifications/telegram.js';
 import type { ChatActionKey, ChatTemplateId, ChatTemplateParams } from './notifications/catalog.js';
+import { isTemplateDeliveryEnabled, projectUserNotificationSettings } from './notifications/preferences.js';
 import { config } from '../config/index.js';
 
 export enum AppEvent {
@@ -145,6 +146,14 @@ function formatViolationType(violationType: EventPayload['post.violation.detecte
   }
 }
 
+function toNotificationMetadata(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
 class AppEventEmitter extends EventEmitter<EventMap> {
   private notificationEnabled = true;
 
@@ -163,6 +172,20 @@ class AppEventEmitter extends EventEmitter<EventMap> {
     this.on(AppEvent.DEAL_ACCEPTED, (data: EventPayload[AppEvent.DEAL_ACCEPTED]) => this.notifyDealAccepted(data));
     this.on(AppEvent.DEAL_CANCELLED, (data: EventPayload[AppEvent.DEAL_CANCELLED]) => this.notifyDealCancelled(data));
     this.on(AppEvent.DEAL_COMPLETED, (data: EventPayload[AppEvent.DEAL_COMPLETED]) => this.notifyDealCompleted(data));
+
+    // Brief application notifications
+    this.on(
+      AppEvent.BRIEF_APPLICATION_SUBMITTED,
+      (data: EventPayload[AppEvent.BRIEF_APPLICATION_SUBMITTED]) => this.notifyBriefApplicationSubmitted(data),
+    );
+    this.on(
+      AppEvent.BRIEF_APPLICATION_ACCEPTED,
+      (data: EventPayload[AppEvent.BRIEF_APPLICATION_ACCEPTED]) => this.notifyBriefApplicationAccepted(data),
+    );
+    this.on(
+      AppEvent.BRIEF_APPLICATION_REJECTED,
+      (data: EventPayload[AppEvent.BRIEF_APPLICATION_REJECTED]) => this.notifyBriefApplicationRejected(data),
+    );
     
     // Creative notifications
     this.on(AppEvent.CREATIVE_SUBMITTED, (data: EventPayload[AppEvent.CREATIVE_SUBMITTED]) => this.notifyCreativeSubmitted(data));
@@ -230,15 +253,46 @@ class AppEventEmitter extends EventEmitter<EventMap> {
 
     // Additional bot-native action for lazy topic opening.
     // Keep template notifications unchanged; this is an extra CTA message.
-    await this.sendOpenDealChatButtons(data.dealId, [data.channelOwnerId, data.advertiserId]);
+    await this.sendOpenDealChatButtons(data.dealId, {
+      channelOwnerId: data.channelOwnerId,
+      advertiserId: data.advertiserId,
+    });
   }
 
-  private async sendOpenDealChatButtons(dealId: string, userIds: string[]) {
-    const uniqueUserIds = [...new Set(userIds.filter((value) => value.trim().length > 0))];
-    if (uniqueUserIds.length === 0) {
+  private async sendOpenDealChatButtons(
+    dealId: string,
+    participants: {
+      channelOwnerId: string;
+      advertiserId: string;
+    },
+  ) {
+    const recipientConfigs: Array<{
+      userId: string;
+      templateId: ChatTemplateId;
+      roleLabel: string;
+    }> = [];
+
+    if (participants.channelOwnerId.trim().length > 0) {
+      recipientConfigs.push({
+        userId: participants.channelOwnerId,
+        templateId: 'B04',
+        roleLabel: 'channel owner',
+      });
+    }
+
+    if (participants.advertiserId.trim().length > 0) {
+      recipientConfigs.push({
+        userId: participants.advertiserId,
+        templateId: 'B05',
+        roleLabel: 'advertiser',
+      });
+    }
+
+    if (recipientConfigs.length === 0) {
       return;
     }
 
+    const uniqueUserIds = [...new Set(recipientConfigs.map((config) => config.userId))];
     const users = await prisma.user.findMany({
       where: {
         id: { in: uniqueUserIds },
@@ -246,21 +300,19 @@ class AppEventEmitter extends EventEmitter<EventMap> {
       select: {
         id: true,
         telegramId: true,
+        notifyAdvertiserMessages: true,
+        notifyPublisherMessages: true,
+        notifyPaymentMessages: true,
+        notifySystemMessages: true,
       },
     });
+    const userById = new Map(users.map((user) => [user.id, user]));
 
-    const resolvedUserIds = new Set(users.map((user) => user.id));
+    const resolvedUserIds = new Set(userById.keys());
     const unresolvedUserIds = uniqueUserIds.filter((userId) => !resolvedUserIds.has(userId));
     if (unresolvedUserIds.length > 0) {
       console.warn(
         `Open deal chat button skipped for deal ${dealId}: unknown users ${unresolvedUserIds.join(', ')}`,
-      );
-    }
-
-    const usersWithoutTelegram = users.filter((user) => user.telegramId === null);
-    for (const user of usersWithoutTelegram) {
-      console.warn(
-        `Open deal chat button skipped for deal ${dealId}: user ${user.id} has no telegramId`,
       );
     }
 
@@ -273,24 +325,42 @@ class AppEventEmitter extends EventEmitter<EventMap> {
       ]],
     };
 
-    const deliveryTasks = users
-      .filter((user) => user.telegramId !== null)
-      .map(async (user) => {
-        try {
-          await telegramBot.sendNotification(
-            user.telegramId!,
-            'Open your private deal chat to start messaging the counterparty.',
-            {
-              parseMode: 'HTML',
-              replyMarkup: inlineKeyboard,
-            },
-          );
-        } catch (error) {
-          // Best effort: if one DM fails, deal chat bridge stays PENDING_OPEN
-          // and user can still open via app deep link.
-          console.error(`Failed to send Open deal chat button to user ${user.id}:`, error);
-        }
-      });
+    const deliveryTasks = recipientConfigs.map(async (recipientConfig) => {
+      const user = userById.get(recipientConfig.userId);
+      if (!user) {
+        return;
+      }
+
+      const deliveryEnabled = isTemplateDeliveryEnabled(
+        projectUserNotificationSettings(user),
+        recipientConfig.templateId,
+      );
+      if (!deliveryEnabled) {
+        return;
+      }
+
+      if (!user.telegramId) {
+        console.warn(
+          `Open deal chat button skipped for deal ${dealId}: ${recipientConfig.roleLabel} ${user.id} has no telegramId`,
+        );
+        return;
+      }
+
+      try {
+        await telegramBot.sendNotification(
+          user.telegramId,
+          'Open your private deal chat to start messaging the counterparty.',
+          {
+            parseMode: 'HTML',
+            replyMarkup: inlineKeyboard,
+          },
+        );
+      } catch (error) {
+        // Best effort: if one DM fails, deal chat bridge stays PENDING_OPEN
+        // and user can still open via app deep link.
+        console.error(`Failed to send Open deal chat button to user ${user.id}:`, error);
+      }
+    });
 
     await Promise.all(deliveryTasks);
   }
@@ -631,6 +701,75 @@ class AppEventEmitter extends EventEmitter<EventMap> {
     ]);
   }
 
+  private async notifyBriefApplicationSubmitted(data: EventPayload['brief.application.submitted']) {
+    const content = buildTemplatedNotificationContent(
+      'B01',
+      { briefTitle: data.briefTitle },
+      { briefId: data.briefId },
+    );
+
+    await this.sendNotifications([
+      {
+        userId: data.advertiserId,
+        type: NotificationType.BRIEF_APPLICATION,
+        ...content,
+        metadata: {
+          applicationId: data.applicationId,
+          briefId: data.briefId,
+          briefTitle: data.briefTitle,
+          channelOwnerId: data.channelOwnerId,
+        },
+      },
+    ]);
+  }
+
+  private async notifyBriefApplicationAccepted(data: EventPayload['brief.application.accepted']) {
+    const content = buildTemplatedNotificationContent(
+      'B02',
+      { briefTitle: data.briefTitle, dealNumber: data.dealNumber },
+      { dealId: data.dealId, briefId: data.briefId },
+    );
+
+    await this.sendNotifications([
+      {
+        userId: data.channelOwnerId,
+        type: NotificationType.APPLICATION_ACCEPTED,
+        ...content,
+        metadata: {
+          applicationId: data.applicationId,
+          briefId: data.briefId,
+          briefTitle: data.briefTitle,
+          dealId: data.dealId,
+          dealNumber: data.dealNumber,
+          advertiserId: data.advertiserId,
+        },
+      },
+    ]);
+  }
+
+  private async notifyBriefApplicationRejected(data: EventPayload['brief.application.rejected']) {
+    const content = buildTemplatedNotificationContent(
+      'B03',
+      { reason: data.reason, briefTitle: data.briefTitle },
+      { briefId: data.briefId },
+    );
+
+    await this.sendNotifications([
+      {
+        userId: data.channelOwnerId,
+        type: NotificationType.APPLICATION_REJECTED,
+        ...content,
+        metadata: {
+          applicationId: data.applicationId,
+          briefId: data.briefId,
+          briefTitle: data.briefTitle,
+          reason: data.reason,
+          advertiserId: data.advertiserId,
+        },
+      },
+    ]);
+  }
+
   /**
    * Send notifications to users via multiple channels
    */
@@ -651,8 +790,34 @@ class AppEventEmitter extends EventEmitter<EventMap> {
   ) {
     if (!this.notificationEnabled) return;
 
+    const uniqueUserIds = [...new Set(notifications.map((notif) => notif.userId))];
+    const users = uniqueUserIds.length > 0
+      ? await prisma.user.findMany({
+          where: {
+            id: { in: uniqueUserIds },
+          },
+          select: {
+            id: true,
+            telegramId: true,
+            notifyAdvertiserMessages: true,
+            notifyPublisherMessages: true,
+            notifyPaymentMessages: true,
+            notifySystemMessages: true,
+          },
+        })
+      : [];
+    const userById = new Map(users.map((user) => [user.id, user]));
+
     for (const notif of notifications) {
       try {
+        const recipient = userById.get(notif.userId);
+        const deliveryEnabled = isTemplateDeliveryEnabled(
+          recipient ? projectUserNotificationSettings(recipient) : undefined,
+          notif.templateId,
+        );
+        const baseMetadata = toNotificationMetadata(notif.metadata);
+        const deliverySuppressedByPreference = !deliveryEnabled;
+
         // Create notification record
         await prisma.notification.create({
           data: {
@@ -662,23 +827,29 @@ class AppEventEmitter extends EventEmitter<EventMap> {
             title: notif.title,
             body: notif.message,
             data: {
-              ...(notif.metadata || {}),
+              ...baseMetadata,
               templateId: notif.templateId,
               primaryActionKey: notif.primaryActionKey,
               secondaryActionKey: notif.secondaryActionKey,
+              ...(deliverySuppressedByPreference
+                ? {
+                    telegramDeliverySuppressed: true,
+                    telegramDeliverySuppressedReason: 'user_preferences',
+                  }
+                : {}),
             },
           },
         });
 
-        // Send via Telegram bot
-        const user = await prisma.user.findUnique({
-          where: { id: notif.userId },
-        });
+        if (deliverySuppressedByPreference) {
+          continue;
+        }
 
-        if (user?.telegramId) {
+        // Send via Telegram bot
+        if (recipient?.telegramId) {
           try {
             await telegramBot.sendNotification(
-              user.telegramId,
+              recipient.telegramId,
               notif.telegramText || `${notif.title}\n\n${notif.message}`,
               {
                 parseMode: notif.telegramParseMode || 'HTML',

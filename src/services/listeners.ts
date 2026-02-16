@@ -3,7 +3,6 @@ import { releaseFunds, refundFunds } from './escrow/index.js';
 import { jobQueue, JobType } from './jobs/index.js';
 import { prisma } from '../lib/prisma.js';
 import { telegramBot } from './telegram/bot.js';
-import { buildTemplatedTelegramNotification } from './notifications/telegram.js';
 import { DealStatus } from '@prisma/client';
 import { dealChatService } from './deal-chat/index.js';
 
@@ -160,112 +159,6 @@ export function setupEventListeners() {
       await telegramBot.finalizeDealTopicsOnClose(data.dealId);
     } catch (error) {
       console.error(`Failed to finalize deal chat for terminal deal ${data.dealId}:`, error);
-    }
-  });
-
-  // ========================================================================
-  // BRIEF APPLICATION NOTIFICATIONS
-  // ========================================================================
-
-  // Notify advertiser when someone applies to their brief
-  appEvents.on(AppEvent.BRIEF_APPLICATION_SUBMITTED, async (data) => {
-    console.log(`Notifying advertiser about new application: ${data.applicationId}`);
-    
-    try {
-      const advertiser = await prisma.user.findUnique({
-        where: { id: data.advertiserId },
-        select: { telegramId: true },
-      });
-
-      if (!advertiser?.telegramId) {
-        console.warn(`Advertiser ${data.advertiserId} has no telegramId`);
-        return;
-      }
-
-      const notification = buildTemplatedTelegramNotification(
-        'B01',
-        { briefTitle: data.briefTitle },
-        { briefId: data.briefId },
-      );
-
-      await telegramBot.sendNotification(
-        advertiser.telegramId,
-        notification.text,
-        {
-          parseMode: notification.parseMode,
-          replyMarkup: notification.replyMarkup,
-        }
-      );
-    } catch (error) {
-      console.error(`Failed to notify advertiser about application ${data.applicationId}:`, error);
-    }
-  });
-
-  // Notify channel owner when their application is accepted
-  appEvents.on(AppEvent.BRIEF_APPLICATION_ACCEPTED, async (data) => {
-    console.log(`Notifying channel owner about accepted application: ${data.applicationId}`);
-    
-    try {
-      const channelOwner = await prisma.user.findUnique({
-        where: { id: data.channelOwnerId },
-        select: { telegramId: true },
-      });
-
-      if (!channelOwner?.telegramId) {
-        console.warn(`Channel owner ${data.channelOwnerId} has no telegramId`);
-        return;
-      }
-
-      const notification = buildTemplatedTelegramNotification(
-        'B02',
-        { briefTitle: data.briefTitle, dealNumber: data.dealNumber },
-        { dealId: data.dealId, briefId: data.briefId },
-      );
-
-      await telegramBot.sendNotification(
-        channelOwner.telegramId,
-        notification.text,
-        {
-          parseMode: notification.parseMode,
-          replyMarkup: notification.replyMarkup,
-        }
-      );
-    } catch (error) {
-      console.error(`Failed to notify channel owner about accepted application ${data.applicationId}:`, error);
-    }
-  });
-
-  // Notify channel owner when their application is rejected
-  appEvents.on(AppEvent.BRIEF_APPLICATION_REJECTED, async (data) => {
-    console.log(`Notifying channel owner about rejected application: ${data.applicationId}`);
-    
-    try {
-      const channelOwner = await prisma.user.findUnique({
-        where: { id: data.channelOwnerId },
-        select: { telegramId: true },
-      });
-
-      if (!channelOwner?.telegramId) {
-        console.warn(`Channel owner ${data.channelOwnerId} has no telegramId`);
-        return;
-      }
-
-      const notification = buildTemplatedTelegramNotification(
-        'B03',
-        { reason: data.reason, briefTitle: data.briefTitle },
-        { briefId: data.briefId },
-      );
-
-      await telegramBot.sendNotification(
-        channelOwner.telegramId,
-        notification.text,
-        {
-          parseMode: notification.parseMode,
-          replyMarkup: notification.replyMarkup,
-        }
-      );
-    } catch (error) {
-      console.error(`Failed to notify channel owner about rejected application ${data.applicationId}:`, error);
     }
   });
 
