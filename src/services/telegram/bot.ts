@@ -331,6 +331,42 @@ async function isThreadReachable(chatId: bigint, threadId: bigint): Promise<bool
   }
 }
 
+async function canDeliverToThread(chatId: bigint, threadId: bigint): Promise<boolean> {
+  try {
+    const probe = await callWithTopicThreadParamFallback({
+      chatId,
+      threadId,
+      operation: (topicParam) => bot.api.sendMessage(
+        chatId.toString(),
+        '\u2063',
+        {
+          ...(topicParam as any),
+          disable_notification: true,
+        } as any,
+      ),
+    }) as { message_id?: number };
+
+    if (typeof probe.message_id === 'number' && Number.isFinite(probe.message_id)) {
+      try {
+        await bot.api.deleteMessage(chatId.toString(), probe.message_id);
+      } catch (cleanupError) {
+        console.warn(
+          `[deal-chat] probe cleanup failed chatId=${chatId.toString()} threadId=${threadId.toString()}`,
+          cleanupError,
+        );
+      }
+    }
+
+    return true;
+  } catch (error) {
+    if (isMissingTopicError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
 function getRawBotApi(): Record<string, (params: Record<string, unknown>) => Promise<unknown>> {
   return bot.api.raw as unknown as Record<string, (params: Record<string, unknown>) => Promise<unknown>>;
 }
@@ -1022,6 +1058,20 @@ function extractDealIdFromOpenStartParam(startParam: string | undefined): string
   return dealId || null;
 }
 
+function parseDealIdFromCommandArg(arg: string | undefined): string | null {
+  if (!arg) {
+    return null;
+  }
+
+  const trimmed = arg.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const [dealId] = trimmed.split(/\s+/);
+  return dealId || null;
+}
+
 function buildOpenDealChatStatusText(result: Awaited<ReturnType<typeof openDealChatInPrivateTopic>>): string {
   if (result.topicCreated) {
     return 'Deal chat opened. Continue in the new topic.';
@@ -1036,6 +1086,25 @@ function buildOpenDealChatStatusText(result: Awaited<ReturnType<typeof openDealC
   }
 
   return 'Deal chat is ready. Waiting for counterparty to open their side.';
+}
+
+function buildDealChatDiagnosticsText(params: {
+  dealId: string;
+  status: DealChatStatus;
+  participantSide: DealChatParticipantSide;
+  threadId: bigint | null;
+  counterpartyThreadId: bigint | null;
+  needsThreadCreation: boolean;
+}): string {
+  return [
+    'Deal chat diagnostics:',
+    `Deal ID: ${params.dealId}`,
+    `Side: ${params.participantSide}`,
+    `Status: ${params.status}`,
+    `My topic thread: ${params.threadId?.toString() ?? 'null'}`,
+    `Counterparty thread: ${params.counterpartyThreadId?.toString() ?? 'null'}`,
+    `Needs topic creation: ${params.needsThreadCreation ? 'yes' : 'no'}`,
+  ].join('\n');
 }
 
 async function handleOpenDealChatEntry(params: {
@@ -1258,31 +1327,66 @@ async function ensureParticipantTopic(params: {
 export async function openDealChatInPrivateTopic(params: {
   dealId: string;
   telegramUserId: ChatIdLike;
+  forceRecovery?: boolean;
 }) {
   const telegramUserId = parsePositiveBigInt(params.telegramUserId, 'telegramUserId');
   const initial = await dealChatService.openDealChatForUser({
     dealId: params.dealId,
     telegramUserId,
   });
+  const participantSide = initial.participantSide as DealChatParticipantSide;
+
+  console.info(
+    `[deal-chat] open-flow state dealId=${params.dealId} user=${telegramUserId.toString()} side=${participantSide} status=${initial.status} threadId=${initial.threadId?.toString() ?? 'null'} counterpartyThreadId=${initial.counterpartyThreadId?.toString() ?? 'null'} forceRecovery=${params.forceRecovery ? 'true' : 'false'}`,
+  );
 
   let finalState = initial;
   let topicCreated = false;
 
   if (initial.status !== DealChatStatus.CLOSED) {
-    let ensured = await ensureParticipantTopic({
-      dealId: params.dealId,
-      side: initial.participantSide as DealChatParticipantSide,
-    });
-
-    // If open-chat sees a known unreachable thread (typically deleted topic) that is still inside
-    // the grace window, force one recovery pass so users don't get "chat is active" with no topic.
-    if (!ensured.reachable && ensured.threadId !== null) {
+    let ensured: Awaited<ReturnType<typeof ensureParticipantTopic>>;
+    if (params.forceRecovery) {
       console.warn(
-        `[deal-chat] open-flow forcing topic recovery dealId=${params.dealId} side=${initial.participantSide} staleThreadId=${ensured.threadId.toString()}`,
+        `[deal-chat] open-flow manual forced recovery dealId=${params.dealId} side=${participantSide}`,
       );
       ensured = await ensureParticipantTopic(
-        buildRecoveryEnsureParticipantTopicParams(params.dealId, initial.participantSide as DealChatParticipantSide),
+        buildRecoveryEnsureParticipantTopicParams(params.dealId, participantSide),
       );
+    } else {
+      ensured = await ensureParticipantTopic({
+        dealId: params.dealId,
+        side: participantSide,
+      });
+
+      // If open-chat sees a known unreachable thread (typically deleted topic) that is still inside
+      // the grace window, force one recovery pass so users don't get "chat is active" with no topic.
+      if (!ensured.reachable && ensured.threadId !== null) {
+        console.warn(
+          `[deal-chat] open-flow forcing topic recovery dealId=${params.dealId} side=${initial.participantSide} staleThreadId=${ensured.threadId.toString()}`,
+        );
+        ensured = await ensureParticipantTopic(
+          buildRecoveryEnsureParticipantTopicParams(params.dealId, participantSide),
+        );
+      }
+
+      if (ensured.threadId !== null && !ensured.recreated) {
+        try {
+          const deliverable = await canDeliverToThread(ensured.chatId, ensured.threadId);
+          if (!deliverable) {
+            console.warn(
+              `[deal-chat] open-flow probe forcing topic recovery dealId=${params.dealId} side=${initial.participantSide} staleThreadId=${ensured.threadId.toString()}`,
+            );
+            ensured = await ensureParticipantTopic(
+              buildRecoveryEnsureParticipantTopicParams(params.dealId, participantSide),
+            );
+          }
+        } catch (probeError) {
+          console.error(
+            `[deal-chat] open-flow topic probe failed dealId=${params.dealId} side=${initial.participantSide}`,
+            probeError,
+          );
+        }
+      }
     }
 
     topicCreated = ensured.recreated;
@@ -1386,6 +1490,88 @@ bot.command('start', async (ctx) => {
       parse_mode: notification.parseMode,
       reply_markup: notification.replyMarkup as any,
     });
+  }
+});
+
+bot.command('openchat', async (ctx) => {
+  const dealId = parseDealIdFromCommandArg(ctx.match);
+  if (!dealId) {
+    await ctx.reply('Usage: /openchat <deal_id>');
+    return;
+  }
+
+  try {
+    if (!ctx.from?.id) {
+      throw new Error('Telegram user is not available');
+    }
+
+    console.info(`[deal-chat] manual /openchat dealId=${dealId} user=${ctx.from.id}`);
+    const opened = await handleOpenDealChatEntry({
+      dealId,
+      telegramUserId: ctx.from.id,
+    });
+    await ctx.reply(opened.statusText);
+  } catch (error) {
+    console.error(`Failed to open deal chat from /openchat for deal ${dealId}:`, error);
+    await ctx.reply('Failed to open deal chat.');
+  }
+});
+
+bot.command('repairchat', async (ctx) => {
+  const dealId = parseDealIdFromCommandArg(ctx.match);
+  if (!dealId) {
+    await ctx.reply('Usage: /repairchat <deal_id>');
+    return;
+  }
+
+  try {
+    if (!ctx.from?.id) {
+      throw new Error('Telegram user is not available');
+    }
+
+    console.info(`[deal-chat] manual /repairchat dealId=${dealId} user=${ctx.from.id}`);
+    const repaired = await openDealChatInPrivateTopic({
+      dealId,
+      telegramUserId: ctx.from.id,
+      forceRecovery: true,
+    });
+    const repairText = repaired.topicCreated
+      ? 'Recovery action: topic recreated.'
+      : 'Recovery action: no recreate needed.';
+    await ctx.reply(`${buildOpenDealChatStatusText(repaired)}\n${repairText}`);
+  } catch (error) {
+    console.error(`Failed to repair deal chat from /repairchat for deal ${dealId}:`, error);
+    await ctx.reply('Failed to repair deal chat.');
+  }
+});
+
+bot.command('chatdiag', async (ctx) => {
+  const dealId = parseDealIdFromCommandArg(ctx.match);
+  if (!dealId) {
+    await ctx.reply('Usage: /chatdiag <deal_id>');
+    return;
+  }
+
+  try {
+    if (!ctx.from?.id) {
+      throw new Error('Telegram user is not available');
+    }
+
+    const state = await dealChatService.openDealChatForUser({
+      dealId,
+      telegramUserId: ctx.from.id,
+    });
+    await ctx.reply(buildDealChatDiagnosticsText({
+      dealId,
+      status: state.status,
+      participantSide: state.participantSide as DealChatParticipantSide,
+      threadId: state.threadId,
+      counterpartyThreadId: state.counterpartyThreadId,
+      needsThreadCreation: state.needsThreadCreation,
+    }));
+  } catch (error) {
+    console.error(`Failed to load deal chat diagnostics from /chatdiag for deal ${dealId}:`, error);
+    await ctx.reply('Failed to load deal chat diagnostics.');
   }
 });
 
