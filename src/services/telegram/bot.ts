@@ -178,6 +178,28 @@ function extractIncomingThreadId(message: unknown): bigint | null {
   return null;
 }
 
+function getBotUsername(): string | null {
+  const username = config.telegramBotUsername.replace(/^@/, '').trim();
+  return username || null;
+}
+
+function buildBotDialogUrl(): string | null {
+  const username = getBotUsername();
+  if (!username) {
+    return null;
+  }
+  return `https://t.me/${username}`;
+}
+
+function buildTopicMessageLink(messageId: number, threadId: bigint): string | null {
+  const username = getBotUsername();
+  if (!username) {
+    return null;
+  }
+
+  return `https://t.me/${username}/${messageId}?thread=${threadId.toString()}`;
+}
+
 function getTopicThreadParamOrder(chatId: bigint): TopicThreadParamKey[] {
   const key = chatId.toString();
   const preferred = topicThreadParamPreference.get(key);
@@ -382,6 +404,37 @@ async function canDeliverToThread(chatId: bigint, threadId: bigint): Promise<boo
 
     throw error;
   }
+}
+
+export async function buildTopicOpenUrlForParticipant(params: {
+  chatId: ChatIdLike;
+  threadId: bigint;
+}): Promise<string | null> {
+  const chatId = parsePositiveBigInt(params.chatId, 'chatId');
+  const botDialogUrl = buildBotDialogUrl();
+  if (!botDialogUrl) {
+    return null;
+  }
+
+  const anchorMessage = await callWithTopicThreadParamFallback({
+    chatId,
+    threadId: params.threadId,
+    operation: (topicParam) => bot.api.sendMessage(
+      chatId.toString(),
+      '\u2063',
+      {
+        ...(topicParam as any),
+        disable_notification: true,
+      } as any,
+    ),
+  }) as unknown as { message_id?: number };
+
+  const messageId = anchorMessage.message_id;
+  if (typeof messageId !== 'number' || !Number.isFinite(messageId) || messageId <= 0) {
+    return botDialogUrl;
+  }
+
+  return buildTopicMessageLink(messageId, params.threadId) ?? botDialogUrl;
 }
 
 function getRawBotApi(): Record<string, (params: Record<string, unknown>) => Promise<unknown>> {

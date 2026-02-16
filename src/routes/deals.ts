@@ -17,7 +17,7 @@ import { dealService } from '../services/deal/index.js';
 import { escrowService } from '../services/escrow/index.js';
 import { appEvents, AppEvent } from '../services/events.js';
 import { jobQueue, JobType } from '../services/jobs/index.js';
-import { openDealChatInPrivateTopic } from '../services/telegram/bot.js';
+import { buildTopicOpenUrlForParticipant, openDealChatInPrivateTopic } from '../services/telegram/bot.js';
 import { normalizeCurrencyInput, requiredCurrencySchema } from '../lib/currency.js';
 import {
   createPresignedS3ReadUrl,
@@ -556,52 +556,14 @@ function buildOpenDealChatStartUrl(dealId: string): string | null {
   return `https://t.me/${username}?start=open_deal_${dealId}`;
 }
 
-function buildOpenDealTopicUrl(threadId: bigint): string | null {
+function buildOpenDealChatUrl(dealId: string): string | null {
   const username = config.telegramBotUsername.replace(/^@/, '').trim();
   if (!username) {
-    return null;
+    return buildOpenDealChatStartUrl(dealId);
   }
 
-  const topicId = threadId.toString();
-  // Topic links use message-link syntax; topic ID equals the topic-create service message ID.
-  return `https://t.me/${username}/${topicId}?thread=${topicId}`;
-}
-
-function buildOpenDealChatUrl(dealId: string, threadId?: bigint | null): string | null {
-  if (threadId !== undefined && threadId !== null) {
-    const topicUrl = buildOpenDealTopicUrl(threadId);
-    if (topicUrl) {
-      return topicUrl;
-    }
-  }
-
-  return buildOpenDealChatStartUrl(dealId);
-}
-
-function resolveViewerDealThreadId(
-  deal: {
-    advertiserId: string;
-    channelOwnerId: string;
-    dealChatBridge?: {
-      advertiserThreadId: bigint | null;
-      publisherThreadId: bigint | null;
-    } | null;
-  },
-  userId: string,
-): bigint | null {
-  if (!deal.dealChatBridge) {
-    return null;
-  }
-
-  if (deal.advertiserId === userId) {
-    return deal.dealChatBridge.advertiserThreadId ?? null;
-  }
-
-  if (deal.channelOwnerId === userId) {
-    return deal.dealChatBridge.publisherThreadId ?? null;
-  }
-
-  return null;
+  // Plain bot link avoids re-triggering /start while still opening the bot chat.
+  return `https://t.me/${username}`;
 }
 
 function buildDealChatPayload(
@@ -757,7 +719,6 @@ function toOverviewDeal(deal: any, userId: string) {
   const deadlines = dealService.getDealDeadlineInfo(deal);
   const dealChat = buildDealChatPayload(deal, userId);
   const redactAdvertiser = shouldRedactAdvertiserForViewer(deal, userId);
-  const viewerThreadId = resolveViewerDealThreadId(deal, userId);
 
   return {
     id: deal.id,
@@ -788,7 +749,7 @@ function toOverviewDeal(deal: any, userId: string) {
     adFormat: deal.adFormat,
     brief: deal.brief,
     dealChat,
-    openDealChatUrl: buildOpenDealChatUrl(deal.id, viewerThreadId),
+    openDealChatUrl: buildOpenDealChatUrl(deal.id),
     availableActions,
     deadlines,
     isAdvertiser: deal.advertiserId === userId,
@@ -1911,9 +1872,31 @@ router.post('/:id/open-chat', telegramAuth, async (req, res, next) => {
       telegramUserId: req.user!.telegramId,
       ensureCounterpartyTopic: true,
     });
-    const openDealChatUrl = buildOpenDealChatUrl(dealId, opened.threadId);
+    let openDealChatUrl = buildOpenDealChatUrl(dealId);
+    let urlMode: 'topic-anchor' | 'bot' | 'start' = openDealChatUrl?.includes('?start=')
+      ? 'start'
+      : 'bot';
+
+    if (opened.threadId !== null) {
+      try {
+        const topicUrl = await buildTopicOpenUrlForParticipant({
+          chatId: req.user!.telegramId,
+          threadId: opened.threadId,
+        });
+        if (topicUrl) {
+          openDealChatUrl = topicUrl;
+          urlMode = 'topic-anchor';
+        }
+      } catch (topicUrlError) {
+        console.warn(
+          `[deal-chat] open-chat endpoint topic-link failed dealId=${dealId} user=${req.user!.telegramId.toString()} threadId=${opened.threadId.toString()}`,
+          topicUrlError,
+        );
+      }
+    }
+
     console.info(
-      `[deal-chat] open-chat endpoint resolved-url dealId=${dealId} user=${req.user!.telegramId.toString()} threadId=${opened.threadId?.toString() ?? 'null'} mode=${opened.threadId ? 'topic' : 'start'} url=${openDealChatUrl ?? 'null'}`,
+      `[deal-chat] open-chat endpoint resolved-url dealId=${dealId} user=${req.user!.telegramId.toString()} threadId=${opened.threadId?.toString() ?? 'null'} mode=${urlMode} url=${openDealChatUrl ?? 'null'}`,
     );
 
     res.json({
