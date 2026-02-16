@@ -12,6 +12,26 @@ import { DealStatus } from '@prisma/client';
 import { appEvents, AppEvent } from '../events.js';
 import { dealService } from '../deal/index.js';
 
+function resolveDealVerificationWindowHours(
+  postingGuaranteeTermHours: number | null,
+  durationHours: number,
+): number | null {
+  if (
+    typeof postingGuaranteeTermHours === 'number'
+    && Number.isFinite(postingGuaranteeTermHours)
+    && postingGuaranteeTermHours > 0
+  ) {
+    return postingGuaranteeTermHours;
+  }
+
+  // Legacy fallback for deals without explicit posting-plan guarantee term.
+  if (Number.isFinite(durationHours) && durationHours > 0) {
+    return durationHours;
+  }
+
+  return null;
+}
+
 /**
  * Register all job processors
  */
@@ -87,6 +107,8 @@ async function processPublishPost(job: Job<JobData[JobType.PUBLISH_POST]>) {
         postedMessageId: true,
         channelId: true,
         postedAt: true,
+        postingGuaranteeTermHours: true,
+        durationHours: true,
       },
     });
 
@@ -98,21 +120,24 @@ async function processPublishPost(job: Job<JobData[JobType.PUBLISH_POST]>) {
         channelId: deal.channelId,
       });
 
-      // Schedule ongoing monitoring (check every hour for 24 hours)
-      // TODO: Temporarily set to 1 minute for testing (check immediately after 1 minute)
-      const verificationEndTime = new Date(deal.postedAt.getTime() + 1 * 60 * 1000);
-      
-      // Schedule a single verification check after the verification period
-      await jobQueue.addJob(
-        JobType.MONITOR_POST,
-        {
-          dealId,
-          messageId: Number(deal.postedMessageId),
-          channelId: deal.channelId,
-          verificationEndTime,
-        },
-        { delay: 1 * 60 * 1000 }, // Check after 1 minute
+      // Schedule final verification based on agreed posting plan guarantee term.
+      const verificationWindowHours = resolveDealVerificationWindowHours(
+        deal.postingGuaranteeTermHours,
+        deal.durationHours,
       );
+      if (verificationWindowHours !== null) {
+        await jobQueue.addJob(
+          JobType.VERIFY_POST,
+          {
+            dealId,
+            messageId: Number(deal.postedMessageId),
+            channelId: deal.channelId,
+          },
+          {
+            delay: Math.max(0, Math.round(verificationWindowHours * 60 * 60 * 1000)),
+          },
+        );
+      }
     }
   } catch (error) {
     console.error(`Failed to publish post for deal ${dealId}:`, error);
@@ -157,17 +182,8 @@ async function processVerifyPost(job: Job<JobData[JobType.VERIFY_POST]>) {
   await monitorDealPost(dealId);
 }
 
-async function processMonitorPost(job: Job<JobData[JobType.MONITOR_POST]>) {
-  const { dealId, verificationEndTime } = job.data;
-
-  // Check if verification period has ended
-  if (new Date() >= verificationEndTime) {
-    // Final verification
-    await monitorDealPost(dealId);
-  } else {
-    // Ongoing monitoring
-    await monitorDealPost(dealId);
-  }
+async function processMonitorPost(_job: Job<JobData[JobType.MONITOR_POST]>) {
+  await scheduledVerificationCheck();
 }
 
 // ============================================================================

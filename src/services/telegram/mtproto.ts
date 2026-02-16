@@ -30,6 +30,11 @@ export type MtprotoSessionState =
   | typeof MTPROTO_STATUS.FAILED
   | typeof MTPROTO_STATUS.DISCONNECTED;
 
+export interface MtprotoChannelPostSnapshot {
+  exists: boolean;
+  editDate: Date | null;
+}
+
 export interface MtprotoStatusPayload {
   enabled: boolean;
   botTokenConfigured: boolean;
@@ -775,6 +780,142 @@ function mapUserTelegramStatusToMtprotoStatus(status: string): MtprotoSessionSta
     return MTPROTO_STATUS.DISCONNECTED;
   }
   return 'NOT_CONNECTED';
+}
+
+function extractFirstMtprotoMessage(value: unknown): Record<string, unknown> | null {
+  if (Array.isArray(value)) {
+    for (const candidate of value) {
+      if (candidate && typeof candidate === 'object') {
+        return candidate as Record<string, unknown>;
+      }
+    }
+    return null;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const nestedMessages = record.messages;
+  if (Array.isArray(nestedMessages)) {
+    for (const candidate of nestedMessages) {
+      if (candidate && typeof candidate === 'object') {
+        return candidate as Record<string, unknown>;
+      }
+    }
+  }
+
+  const firstItem = record['0'];
+  if (firstItem && typeof firstItem === 'object') {
+    return firstItem as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+function toMessageEditDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  const numericValue =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'bigint'
+        ? Number(value)
+        : typeof value === 'string'
+          ? Number(value)
+          : NaN;
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  // Telegram often returns unix seconds for message edit timestamps.
+  const milliseconds = numericValue > 10_000_000_000 ? numericValue : numericValue * 1000;
+  const parsed = new Date(milliseconds);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isMessageMissingError(error: unknown): boolean {
+  const normalized = parseTelegramError(error).toUpperCase();
+  return (
+    normalized.includes('MESSAGE_ID_INVALID')
+    || normalized.includes('MESSAGE_IDS_EMPTY')
+    || normalized.includes('MESSAGE_EMPTY')
+  );
+}
+
+export async function fetchChannelPostSnapshotFromMtproto(params: {
+  ownerId: string;
+  channelUsername: string;
+  messageId: number;
+}): Promise<MtprotoChannelPostSnapshot> {
+  ensureMtprotoEnabled();
+
+  if (!Number.isFinite(params.messageId) || params.messageId <= 0) {
+    throw new Error('Invalid message ID for MTProto verification.');
+  }
+
+  const hasSession = await hasAuthorizedUserMtprotoSession(params.ownerId);
+  if (!hasSession) {
+    throw new Error('MTProto user session is not connected for this channel owner.');
+  }
+
+  const ownerSession = await getAuthorizedUserMtprotoSession(params.ownerId);
+  if (!ownerSession) {
+    throw new Error('MTProto user session is unavailable for this channel owner.');
+  }
+
+  const { client } = await createMtprotoClient(ownerSession);
+  const channelRef = params.channelUsername.startsWith('@')
+    ? params.channelUsername
+    : `@${params.channelUsername}`;
+
+  const persistSessionAndClearErrors = async () => {
+    await setUserTelegramSessionError(params.ownerId, null);
+    const nextSerializedSession = serializeSession(client);
+    await persistAuthorizedUserMtprotoSession(params.ownerId, nextSerializedSession);
+  };
+
+  try {
+    const messages = await client.getMessages(channelRef, { ids: [params.messageId] });
+    const message = extractFirstMtprotoMessage(messages);
+    if (!message) {
+      await persistSessionAndClearErrors();
+      return { exists: false, editDate: null };
+    }
+
+    const className = typeof message.className === 'string' ? message.className : '';
+    if (className.toLowerCase() === 'messageempty') {
+      await persistSessionAndClearErrors();
+      return { exists: false, editDate: null };
+    }
+
+    const actualMessageId = toFiniteNumber(message.id);
+    if (actualMessageId === null || Math.trunc(actualMessageId) !== Math.trunc(params.messageId)) {
+      await persistSessionAndClearErrors();
+      return { exists: false, editDate: null };
+    }
+
+    const editDate = toMessageEditDate(message.editDate ?? message.edit_date);
+    await persistSessionAndClearErrors();
+
+    return {
+      exists: true,
+      editDate,
+    };
+  } catch (error) {
+    if (isMessageMissingError(error)) {
+      await persistSessionAndClearErrors();
+      return { exists: false, editDate: null };
+    }
+
+    await setUserTelegramSessionError(params.ownerId, parseTelegramError(error));
+    throw error;
+  } finally {
+    await disconnectClient(client);
+  }
 }
 
 export async function getMtprotoSessionStatus(

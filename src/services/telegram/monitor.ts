@@ -1,9 +1,8 @@
 import { prisma } from '../../lib/prisma.js';
-import { bot } from './bot.js';
 import { appEvents, AppEvent } from '../events.js';
-import { checkPostExists } from './posting.js';
 import { DealStatus } from '@prisma/client';
 import { dealService } from '../deal/index.js';
+import { fetchChannelPostSnapshotFromMtproto } from './mtproto.js';
 
 export interface VerificationResult {
   exists: boolean;
@@ -12,19 +11,52 @@ export interface VerificationResult {
   violationType?: 'deleted' | 'edited' | 'hidden';
 }
 
+function isVerificationPrerequisiteError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes('mtproto is not configured')
+    || message.includes('mtproto user session is not connected')
+    || message.includes('mtproto user session is unavailable')
+    || message.includes('deal has no agreed posting guarantee term')
+  );
+}
+
+function resolveVerificationWindowHours(
+  postingGuaranteeTermHours: number | null,
+  durationHours: number,
+): number {
+  if (
+    typeof postingGuaranteeTermHours === 'number'
+    && Number.isFinite(postingGuaranteeTermHours)
+    && postingGuaranteeTermHours > 0
+  ) {
+    return postingGuaranteeTermHours;
+  }
+
+  // Legacy fallback for deals created before posting-plan guarantee term existed.
+  if (Number.isFinite(durationHours) && durationHours > 0) {
+    return durationHours;
+  }
+
+  throw new Error('Deal has no agreed posting guarantee term');
+}
+
 /**
  * Verify a posted message meets requirements
  */
 export async function verifyPost(
   channelUsername: string,
   messageId: number,
-  originalContent?: string,
+  ownerId: string,
 ): Promise<VerificationResult> {
   try {
-    // Check if post exists
-    const postCheck = await checkPostExists(channelUsername, messageId);
+    const postSnapshot = await fetchChannelPostSnapshotFromMtproto({
+      ownerId,
+      channelUsername,
+      messageId,
+    });
 
-    if (!postCheck.exists) {
+    if (!postSnapshot.exists) {
       return {
         exists: false,
         isEdited: false,
@@ -33,8 +65,7 @@ export async function verifyPost(
       };
     }
 
-    // Check if post was edited
-    const isEdited = !!postCheck.editDate;
+    const isEdited = !!postSnapshot.editDate;
 
     return {
       exists: true,
@@ -56,12 +87,15 @@ export async function monitorDealPost(dealId: string): Promise<void> {
     where: { id: dealId },
     include: {
       channel: true,
-      creative: true,
     },
   });
 
   if (!deal) {
     throw new Error('Deal not found');
+  }
+
+  if (deal.status !== DealStatus.POSTED) {
+    return;
   }
 
   if (!deal.postedMessageId) {
@@ -81,7 +115,7 @@ export async function monitorDealPost(dealId: string): Promise<void> {
     const verification = await verifyPost(
       deal.channel.username,
       Number(deal.postedMessageId),
-      deal.creative?.text || undefined,
+      deal.channel.ownerId,
     );
 
     if (verification.isDeleted) {
@@ -96,9 +130,11 @@ export async function monitorDealPost(dealId: string): Promise<void> {
       return;
     }
 
-    // Check if verification period has passed
-    // TODO: Temporarily set to 1 minute for testing
-    const verificationDuration = 1 / 60; // 1 minute (in hours)
+    // Check if verification period has passed.
+    const verificationDuration = resolveVerificationWindowHours(
+      deal.postingGuaranteeTermHours,
+      deal.durationHours,
+    );
     const verificationEndTime = new Date(
       deal.postedAt.getTime() + verificationDuration * 60 * 60 * 1000,
     );
@@ -108,6 +144,13 @@ export async function monitorDealPost(dealId: string): Promise<void> {
       await completeDealVerification(dealId);
     }
   } catch (error) {
+    if (isVerificationPrerequisiteError(error)) {
+      console.warn(
+        `Skipping post verification for deal ${dealId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+
     console.error(`Error monitoring deal ${dealId}:`, error);
     throw error;
   }
@@ -131,6 +174,10 @@ async function handlePostViolation(
 
   if (!deal) return;
 
+  if (deal.status !== DealStatus.POSTED && deal.status !== DealStatus.VERIFIED) {
+    return;
+  }
+
   // Emit violation event
   appEvents.emit(AppEvent.POST_VIOLATION_DETECTED, {
     dealId,
@@ -147,6 +194,7 @@ async function handlePostViolation(
     where: { id: dealId },
     data: {
       notes: `Post ${violationType} during verification period`,
+      deletedAt: violationType === 'deleted' ? new Date() : undefined,
     },
   });
 
@@ -164,15 +212,14 @@ async function completeDealVerification(dealId: string): Promise<void> {
     where: { id: dealId },
     select: {
       postedAt: true,
+      status: true,
     },
   });
 
-  if (!deal) return;
+  if (!deal || !deal.postedAt || deal.status !== DealStatus.POSTED) return;
 
   // Calculate verification duration
-  const verificationDuration = deal.postedAt
-    ? (new Date().getTime() - deal.postedAt.getTime()) / (1000 * 60 * 60)
-    : 0;
+  const verificationDuration = (new Date().getTime() - deal.postedAt.getTime()) / (1000 * 60 * 60);
 
   // Emit verification complete event
   appEvents.emit(AppEvent.POST_VERIFIED, {
@@ -180,9 +227,14 @@ async function completeDealVerification(dealId: string): Promise<void> {
     verificationDuration,
   });
 
-  await dealService.updateStatus(dealId, DealStatus.VERIFIED, 'SYSTEM', {
+  const verifiedTransition = await dealService.updateStatus(dealId, DealStatus.VERIFIED, 'SYSTEM', {
     verificationDuration,
   });
+
+  if (!verifiedTransition._transitioned && verifiedTransition.status !== DealStatus.VERIFIED) {
+    return;
+  }
+
   await dealService.updateStatus(dealId, DealStatus.COMPLETED, 'SYSTEM', {
     verificationDuration,
   });

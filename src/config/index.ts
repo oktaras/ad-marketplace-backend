@@ -220,7 +220,6 @@ export const config = {
     payment: 48,
     creative: 48,
     creativeReview: 48,
-    postVerification: 24,
   },
   
   // Escrow settings

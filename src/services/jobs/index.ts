@@ -32,7 +32,7 @@ export interface JobData {
   [JobType.SCHEDULE_POST]: { dealId: string; scheduledTime: Date };
   [JobType.PUBLISH_POST]: { dealId: string; creativeId: string };
   [JobType.VERIFY_POST]: { dealId: string; messageId: number; channelId: string };
-  [JobType.MONITOR_POST]: { dealId: string; messageId: number; channelId: string; verificationEndTime: Date };
+  [JobType.MONITOR_POST]: {};
   [JobType.CHECK_DEAL_TIMEOUTS]: {};
   [JobType.SEND_TIMEOUT_WARNING]: { dealId: string };
   [JobType.EXPIRE_DEAL]: { dealId: string };
@@ -315,6 +315,18 @@ export async function setupRecurringJobs() {
         pattern: '0 4 * * *', // Daily at 4 AM
       },
       jobId: 'recurring-check-admin-status',
+    },
+  );
+
+  // Re-check active posted deals every 15 minutes during the verification window.
+  await jobQueue.addJob(
+    JobType.MONITOR_POST,
+    {},
+    {
+      repeat: {
+        pattern: '*/15 * * * *',
+      },
+      jobId: 'recurring-monitor-post-verification',
     },
   );
 
