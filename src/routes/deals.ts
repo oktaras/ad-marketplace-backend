@@ -600,6 +600,75 @@ function sanitizeAdvertiserPayload(
   };
 }
 
+function parseDecimalUnits(value: string): { units: bigint; scale: number } | null {
+  const trimmed = value.trim();
+  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return null;
+  }
+
+  const isNegative = trimmed.startsWith('-');
+  const unsigned = isNegative ? trimmed.slice(1) : trimmed;
+  const [wholePart, fractionPart = ''] = unsigned.split('.');
+  const scale = fractionPart.length;
+  const compact = `${wholePart}${fractionPart}`.replace(/^0+(?=\d)/, '') || '0';
+
+  try {
+    let units = BigInt(compact);
+    if (isNegative) {
+      units = -units;
+    }
+    return { units, scale };
+  } catch {
+    return null;
+  }
+}
+
+function formatDecimalUnits(units: bigint, scale: number): string {
+  const isNegative = units < 0n;
+  const absUnits = isNegative ? -units : units;
+
+  if (scale === 0) {
+    return `${isNegative ? '-' : ''}${absUnits.toString()}`;
+  }
+
+  const divider = 10n ** BigInt(scale);
+  const whole = absUnits / divider;
+  const fraction = (absUnits % divider)
+    .toString()
+    .padStart(scale, '0')
+    .replace(/0+$/, '');
+
+  if (!fraction) {
+    return `${isNegative ? '-' : ''}${whole.toString()}`;
+  }
+
+  return `${isNegative ? '-' : ''}${whole.toString()}.${fraction}`;
+}
+
+function calculateFeeBreakdownForDisplay(
+  agreedPrice: string,
+  platformFeeBps: number,
+): { platformFeeAmount: string; publisherAmount: string } | null {
+  const parsed = parseDecimalUnits(agreedPrice);
+  if (!parsed) {
+    return null;
+  }
+
+  const normalizedBps = Number.isFinite(platformFeeBps)
+    ? Math.max(0, Math.min(10_000, Math.round(platformFeeBps)))
+    : 0;
+  const outputScale = Math.max(parsed.scale, 6);
+  const scaleFactor = 10n ** BigInt(outputScale - parsed.scale);
+  const scaledAmountUnits = parsed.units * scaleFactor;
+  const feeUnits = (scaledAmountUnits * BigInt(normalizedBps)) / 10_000n;
+  const publisherUnits = scaledAmountUnits - feeUnits;
+
+  return {
+    platformFeeAmount: formatDecimalUnits(feeUnits, outputScale),
+    publisherAmount: formatDecimalUnits(publisherUnits, outputScale),
+  };
+}
+
 function toOverviewDeal(deal: any, userId: string) {
   const availableActions = dealService.getDealAvailableActions(deal, userId);
   const deadlines = dealService.getDealDeadlineInfo(deal);
@@ -671,9 +740,49 @@ function toActivityTimestamp(value: unknown): string | null {
   return Number.isFinite(Date.parse(value)) ? value : null;
 }
 
+function normalizeActivityActorLabel(
+  actor: unknown,
+  advertiserId: string,
+  channelOwnerId: string,
+): string {
+  if (typeof actor !== 'string') {
+    return 'System';
+  }
+
+  const value = actor.trim();
+  if (!value) {
+    return 'System';
+  }
+
+  const upper = value.toUpperCase();
+  if (upper === 'SYSTEM') {
+    return 'System';
+  }
+
+  if (upper === 'ADVERTISER') {
+    return 'Advertiser';
+  }
+
+  if (upper === 'PUBLISHER' || upper === 'CHANNEL_OWNER') {
+    return 'Publisher';
+  }
+
+  if (value === advertiserId) {
+    return 'Advertiser';
+  }
+
+  if (value === channelOwnerId) {
+    return 'Publisher';
+  }
+
+  return 'Participant';
+}
+
 function buildDealActivityPayload(deal: {
   id: string;
   createdAt: Date;
+  advertiserId: string;
+  channelOwnerId: string;
   statusHistory: unknown;
   creative: null | {
     id: string;
@@ -697,7 +806,7 @@ function buildDealActivityPayload(deal: {
     {
       id: `system-created-${deal.id}`,
       timestamp: deal.createdAt.toISOString(),
-      actor: 'SYSTEM',
+      actor: 'System',
       type: 'system',
       title: 'Deal Created',
       detail: 'Deal was created and entered workflow.',
@@ -720,7 +829,11 @@ function buildDealActivityPayload(deal: {
         return;
       }
 
-      const actor = typeof candidate.actor === 'string' ? candidate.actor : 'SYSTEM';
+      const actor = normalizeActivityActorLabel(
+        candidate.actor,
+        deal.advertiserId,
+        deal.channelOwnerId,
+      );
       items.push({
         id: `status-${deal.id}-${index}-${timestamp}`,
         timestamp,
@@ -738,7 +851,7 @@ function buildDealActivityPayload(deal: {
       items.push({
         id: `creative-submitted-${deal.creative.id}`,
         timestamp: submittedAt,
-        actor: 'PUBLISHER',
+        actor: 'Publisher',
         type: 'creative',
         title: 'Creative Submitted',
         detail: 'Publisher submitted creative for review.',
@@ -749,7 +862,7 @@ function buildDealActivityPayload(deal: {
       items.push({
         id: `creative-feedback-${deal.creative.id}-${deal.creative.updatedAt.toISOString()}`,
         timestamp: deal.creative.updatedAt.toISOString(),
-        actor: 'ADVERTISER',
+        actor: 'Advertiser',
         type: 'creative',
         title: 'Creative Revision Requested',
         detail: deal.creative.feedback,
@@ -760,7 +873,7 @@ function buildDealActivityPayload(deal: {
       items.push({
         id: `creative-approved-${deal.creative.id}`,
         timestamp: deal.creative.approvedAt.toISOString(),
-        actor: 'ADVERTISER',
+        actor: 'Advertiser',
         type: 'creative',
         title: 'Creative Approved',
         detail: 'Creative approved and moved to posting workflow.',
@@ -772,7 +885,7 @@ function buildDealActivityPayload(deal: {
     items.push({
       id: `plan-${proposal.id}`,
       timestamp: proposal.createdAt.toISOString(),
-      actor: proposal.proposedBy === PostingPlanActor.ADVERTISER ? 'ADVERTISER' : 'PUBLISHER',
+      actor: proposal.proposedBy === PostingPlanActor.ADVERTISER ? 'Advertiser' : 'Publisher',
       type: 'plan',
       title: `Posting Plan ${toStatusLabel(proposal.status)}`,
       detail: `Method: ${proposal.method}. Scheduled: ${proposal.scheduledAt.toISOString()}. Guarantee: ${proposal.guaranteeTermHours}h.`,
@@ -1493,6 +1606,7 @@ router.get('/:id/finance', telegramAuth, async (req, res, next) => {
         channelOwnerId: true,
         agreedPrice: true,
         currency: true,
+        platformFeeBps: true,
         platformFeeAmount: true,
         publisherAmount: true,
         escrowStatus: true,
@@ -1513,6 +1627,12 @@ router.get('/:id/finance', telegramAuth, async (req, res, next) => {
     }
 
     assertDealPartyAccess(deal, req.user!.id);
+    const platformFeeBps = Number.isFinite(deal.platformFeeBps)
+      ? deal.platformFeeBps
+      : config.platformFeeBps;
+    const calculatedBreakdown = calculateFeeBreakdownForDisplay(deal.agreedPrice, platformFeeBps);
+    const platformFeeAmount = calculatedBreakdown?.platformFeeAmount ?? deal.platformFeeAmount ?? '0';
+    const publisherAmount = calculatedBreakdown?.publisherAmount ?? deal.publisherAmount ?? '0';
 
     res.json({
       status: deal.status,
@@ -1521,8 +1641,10 @@ router.get('/:id/finance', telegramAuth, async (req, res, next) => {
       finance: {
         agreedPrice: deal.agreedPrice,
         currency: deal.currency,
-        platformFeeAmount: deal.platformFeeAmount,
-        publisherAmount: deal.publisherAmount,
+        platformFeeBps,
+        platformFeePercent: platformFeeBps / 100,
+        platformFeeAmount,
+        publisherAmount,
         escrowStatus: deal.escrowStatus,
         escrowWallet: deal.escrowWallet,
       },
