@@ -42,6 +42,16 @@ const CANCELABLE_STATUSES: DealStatus[] = [
   DealStatus.NEGOTIATING,
   DealStatus.TERMS_AGREED,
   DealStatus.AWAITING_PAYMENT,
+  DealStatus.FUNDED,
+  DealStatus.AWAITING_CREATIVE,
+  DealStatus.CREATIVE_SUBMITTED,
+  DealStatus.CREATIVE_REVISION,
+  DealStatus.CREATIVE_APPROVED,
+  DealStatus.AWAITING_POSTING_PLAN,
+  DealStatus.POSTING_PLAN_AGREED,
+  DealStatus.SCHEDULED,
+  DealStatus.AWAITING_MANUAL_POST,
+  DealStatus.POSTING,
 ];
 
 const TRANSITION_RULES: Partial<Record<DealStatus, TransitionRule>> = {
@@ -110,7 +120,7 @@ const TRANSITION_RULES: Partial<Record<DealStatus, TransitionRule>> = {
     actors: ['SYSTEM'],
   },
   [DealStatus.CANCELLED]: {
-    from: [...CANCELABLE_STATUSES, DealStatus.POSTING],
+    from: [...CANCELABLE_STATUSES],
     actors: ['ADVERTISER', 'PUBLISHER', 'SYSTEM'],
   },
   [DealStatus.EXPIRED]: {

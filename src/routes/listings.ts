@@ -280,6 +280,30 @@ function serializeListing(listing: any) {
  *         schema:
  *           type: string
  *       - in: query
+ *         name: minSubscribers
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: maxSubscribers
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: minViews
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: maxViews
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: minEngagementRate
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: maxEngagementRate
+ *         schema:
+ *           type: string
+ *       - in: query
  *         name: formatType
  *         schema:
  *           type: string
@@ -307,6 +331,12 @@ router.get('/', optionalAuth, async (req, res, next) => {
       language,
       minPrice,
       maxPrice,
+      minSubscribers,
+      maxSubscribers,
+      minViews,
+      maxViews,
+      minEngagementRate,
+      maxEngagementRate,
       formatType,
       search,
       sortBy = 'created_desc',
@@ -316,12 +346,25 @@ router.get('/', optionalAuth, async (req, res, next) => {
     const parsedLimit = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
     const skip = (parsedPage - 1) * parsedLimit;
     const normalizedSortBy = parseSortBy(sortBy as string | string[] | undefined);
+    const categorySlugs = getMultiParam(category as string | string[] | undefined);
     const searchTerm = typeof search === 'string' ? search.trim() : '';
     const searchQuery = searchTerm.length >= 3 ? searchTerm : '';
     const minPriceValue = typeof minPrice === 'string' ? parseNumeric(minPrice) : 0;
     const maxPriceValue = typeof maxPrice === 'string' ? parseNumeric(maxPrice) : 0;
+    const minSubscribersValue = typeof minSubscribers === 'string' ? parseNumeric(minSubscribers) : 0;
+    const maxSubscribersValue = typeof maxSubscribers === 'string' ? parseNumeric(maxSubscribers) : 0;
+    const minViewsValue = typeof minViews === 'string' ? parseNumeric(minViews) : 0;
+    const maxViewsValue = typeof maxViews === 'string' ? parseNumeric(maxViews) : 0;
+    const minEngagementRateValue = typeof minEngagementRate === 'string' ? parseNumeric(minEngagementRate) : 0;
+    const maxEngagementRateValue = typeof maxEngagementRate === 'string' ? parseNumeric(maxEngagementRate) : 0;
     const hasMinPrice = typeof minPrice === 'string' && minPrice.trim().length > 0;
     const hasMaxPrice = typeof maxPrice === 'string' && maxPrice.trim().length > 0;
+    const hasMinSubscribers = typeof minSubscribers === 'string' && minSubscribers.trim().length > 0;
+    const hasMaxSubscribers = typeof maxSubscribers === 'string' && maxSubscribers.trim().length > 0;
+    const hasMinViews = typeof minViews === 'string' && minViews.trim().length > 0;
+    const hasMaxViews = typeof maxViews === 'string' && maxViews.trim().length > 0;
+    const hasMinEngagementRate = typeof minEngagementRate === 'string' && minEngagementRate.trim().length > 0;
+    const hasMaxEngagementRate = typeof maxEngagementRate === 'string' && maxEngagementRate.trim().length > 0;
     const normalizedFormatType = typeof formatType === 'string' ? formatType.toUpperCase() : '';
 
     const formatCondition = normalizedFormatType
@@ -349,8 +392,8 @@ router.get('/', optionalAuth, async (req, res, next) => {
       channel: {
         status: 'ACTIVE' as const,
         deletedAt: null,
-        ...(category && {
-          categories: { some: { slug: category as string } },
+        ...(categorySlugs.length > 0 && {
+          categories: { some: { slug: { in: categorySlugs } } },
         }),
         ...(language && { language: language as string }),
       },
@@ -394,11 +437,39 @@ router.get('/', optionalAuth, async (req, res, next) => {
 
     const filteredListings = listings.filter((listing: any) => {
       const price = getListingPriceMetric(listing);
+      const subscribers = getListingSubscribersMetric(listing);
+      const views = getListingViewsMetric(listing);
+      const engagementRate = getListingErMetric(listing);
+
       if (hasMinPrice && price < minPriceValue) {
         return false;
       }
 
       if (hasMaxPrice && price > maxPriceValue) {
+        return false;
+      }
+
+      if (hasMinSubscribers && subscribers < minSubscribersValue) {
+        return false;
+      }
+
+      if (hasMaxSubscribers && subscribers > maxSubscribersValue) {
+        return false;
+      }
+
+      if (hasMinViews && views < minViewsValue) {
+        return false;
+      }
+
+      if (hasMaxViews && views > maxViewsValue) {
+        return false;
+      }
+
+      if (hasMinEngagementRate && engagementRate < minEngagementRateValue) {
+        return false;
+      }
+
+      if (hasMaxEngagementRate && engagementRate > maxEngagementRateValue) {
         return false;
       }
 

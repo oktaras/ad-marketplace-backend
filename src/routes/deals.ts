@@ -316,6 +316,9 @@ function buildPostingPlanPayload(
     scheduledTime: Date | null;
     manualPostWindowHours: number | null;
     postingGuaranteeTermHours: number | null;
+    durationHours?: number | null;
+    status?: DealStatus;
+    statusHistory?: unknown;
     postingPlanProposals?: Array<{
       id: string;
       proposedBy: PostingPlanActor;
@@ -333,17 +336,171 @@ function buildPostingPlanPayload(
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .map(mapProposal);
 
+  const parseIsoTimestamp = (value: unknown): string | null => {
+    if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+      return null;
+    }
+
+    return value;
+  };
+
+  const firstMatchingStatusTimestamp = (statuses: DealStatus[]): string | null => {
+    if (!Array.isArray(deal.statusHistory)) {
+      return null;
+    }
+
+    for (const entry of deal.statusHistory) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+
+      const candidate = entry as { status?: unknown; timestamp?: unknown };
+      if (!statuses.includes(candidate.status as DealStatus)) {
+        continue;
+      }
+
+      const timestamp = parseIsoTimestamp(candidate.timestamp);
+      if (timestamp) {
+        return timestamp;
+      }
+    }
+
+    return null;
+  };
+
+  const inferredScheduledDate = (
+    deal.scheduledTime?.toISOString()
+    || firstMatchingStatusTimestamp([
+      DealStatus.SCHEDULED,
+      DealStatus.POSTING,
+      DealStatus.POSTED,
+      DealStatus.VERIFIED,
+      DealStatus.COMPLETED,
+    ])
+    || undefined
+  );
+
+  const inferredMethod: 'scheduled' | 'manual' | undefined =
+    deal.postingMethod === 'AUTO'
+      ? 'scheduled'
+      : deal.postingMethod === 'MANUAL'
+        ? 'manual'
+        : inferredScheduledDate
+          ? 'scheduled'
+          : undefined;
+
+  const inferredGuaranteeTerm = (
+    deal.postingGuaranteeTermHours
+    ?? (typeof deal.durationHours === 'number' && deal.durationHours > 0 ? deal.durationHours : undefined)
+  );
+
   return {
-    agreedMethod:
-      deal.postingMethod === 'AUTO'
-        ? 'scheduled'
-        : deal.postingMethod === 'MANUAL'
-          ? 'manual'
-          : undefined,
-    agreedDate: deal.scheduledTime ? deal.scheduledTime.toISOString() : undefined,
+    agreedMethod: inferredMethod,
+    agreedDate: inferredScheduledDate,
     windowHours: deal.manualPostWindowHours ?? undefined,
-    guaranteeTerm: deal.postingGuaranteeTermHours ?? undefined,
+    guaranteeTerm: inferredGuaranteeTerm,
     proposals,
+  };
+}
+
+function buildLegacyCreativeSnapshot(input: {
+  id: string;
+  status: DealStatus;
+  statusHistory: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}): {
+  id: string;
+  text: string;
+  mediaUrls: string[];
+  mediaTypes: string[];
+  mediaMeta: unknown[];
+  buttons: unknown[];
+  status: 'SUBMITTED' | 'REVISION_REQUESTED' | 'APPROVED';
+  feedback: string | null;
+  version: number;
+  submittedAt: string | null;
+  approvedAt: string | null;
+  updatedAt: string;
+} | null {
+  const parseIsoTimestamp = (value: unknown): string | null => {
+    if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+      return null;
+    }
+
+    return value;
+  };
+
+  const lastMatchingStatusTimestamp = (statuses: DealStatus[]): string | null => {
+    if (!Array.isArray(input.statusHistory)) {
+      return null;
+    }
+
+    for (let index = input.statusHistory.length - 1; index >= 0; index -= 1) {
+      const entry = input.statusHistory[index];
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+
+      const candidate = entry as { status?: unknown; timestamp?: unknown };
+      if (!statuses.includes(candidate.status as DealStatus)) {
+        continue;
+      }
+
+      const timestamp = parseIsoTimestamp(candidate.timestamp);
+      if (timestamp) {
+        return timestamp;
+      }
+    }
+
+    return null;
+  };
+
+  const submittedAt = lastMatchingStatusTimestamp([DealStatus.CREATIVE_SUBMITTED]);
+  const revisionAt = lastMatchingStatusTimestamp([DealStatus.CREATIVE_REVISION]);
+  const approvedAt = lastMatchingStatusTimestamp([DealStatus.CREATIVE_APPROVED]);
+
+  const progressedPastCreativeStatuses: DealStatus[] = [
+    DealStatus.AWAITING_POSTING_PLAN,
+    DealStatus.POSTING_PLAN_AGREED,
+    DealStatus.SCHEDULED,
+    DealStatus.AWAITING_MANUAL_POST,
+    DealStatus.POSTING,
+    DealStatus.POSTED,
+    DealStatus.VERIFIED,
+    DealStatus.COMPLETED,
+    DealStatus.CANCELLED,
+    DealStatus.EXPIRED,
+    DealStatus.REFUNDED,
+    DealStatus.DISPUTED,
+    DealStatus.RESOLVED,
+  ];
+  const progressedPastCreative = progressedPastCreativeStatuses.includes(input.status);
+
+  if (!submittedAt && !revisionAt && !approvedAt && !progressedPastCreative) {
+    return null;
+  }
+
+  const fallbackTimestamp = input.updatedAt.toISOString();
+  const snapshotStatus: 'SUBMITTED' | 'REVISION_REQUESTED' | 'APPROVED' = approvedAt
+    ? 'APPROVED'
+    : revisionAt
+      ? 'REVISION_REQUESTED'
+      : 'SUBMITTED';
+
+  return {
+    id: `legacy-creative-${input.id}`,
+    text: 'Legacy deal: creative content snapshot is unavailable in the current storage format.',
+    mediaUrls: [],
+    mediaTypes: [],
+    mediaMeta: [],
+    buttons: [],
+    status: snapshotStatus,
+    feedback: revisionAt ? 'Revision was requested in this legacy deal record.' : null,
+    version: 1,
+    submittedAt: submittedAt || (progressedPastCreative ? input.createdAt.toISOString() : null),
+    approvedAt: approvedAt ?? null,
+    updatedAt: approvedAt || revisionAt || submittedAt || fallbackTimestamp,
   };
 }
 
@@ -1278,6 +1435,9 @@ router.get('/:id/creative', telegramAuth, async (req, res, next) => {
         status: true,
         advertiserId: true,
         channelOwnerId: true,
+        statusHistory: true,
+        createdAt: true,
+        updatedAt: true,
         creative: {
           select: {
             id: true,
@@ -1302,11 +1462,18 @@ router.get('/:id/creative', telegramAuth, async (req, res, next) => {
     }
 
     assertDealPartyAccess(deal, req.user!.id);
+    const creativePayload = deal.creative ?? buildLegacyCreativeSnapshot({
+      id: deal.id,
+      status: deal.status,
+      statusHistory: deal.statusHistory,
+      createdAt: deal.createdAt,
+      updatedAt: deal.updatedAt,
+    });
 
     res.json({
       status: deal.status,
       workflowStatus: deal.status,
-      creative: withSignedCreativeMediaUrls(deal.creative),
+      creative: withSignedCreativeMediaUrls(creativePayload),
       availableActions: dealService.getDealAvailableActions(deal, req.user!.id),
     });
   } catch (error) {
@@ -2321,9 +2488,11 @@ router.get('/:id/posting-plan', telegramAuth, async (req, res, next) => {
         channelOwnerId: true,
         status: true,
         postingMethod: true,
+        durationHours: true,
         scheduledTime: true,
         manualPostWindowHours: true,
         postingGuaranteeTermHours: true,
+        statusHistory: true,
         postingPlanProposals: {
           select: {
             id: true,
@@ -2690,15 +2859,8 @@ router.post('/:id/cancel', telegramAuth, async (req, res, next) => {
       throw new ForbiddenError('Not a party to this deal');
     }
 
-    // Can only cancel in certain states
-    const cancellableStates = [
-      'CREATED',
-      'NEGOTIATING',
-      'TERMS_AGREED',
-      'AWAITING_PAYMENT',
-    ];
-
-    if (!cancellableStates.includes(deal.status)) {
+    const availableActions = dealService.getDealAvailableActions(deal, req.user!.id);
+    if (!availableActions.cancelDeal) {
       throw new ValidationError('Deal cannot be cancelled in current status');
     }
 

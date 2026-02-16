@@ -226,6 +226,22 @@ function compareBriefs(a: any, b: any, sortBy: BriefSortBy): number {
  *         name: maxBudget
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: minSubscribers
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: maxSubscribers
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: minApplications
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: maxApplications
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
  *         description: Briefs retrieved successfully
@@ -249,6 +265,10 @@ router.get('/', optionalAuth, async (req, res, next) => {
       category,
       minBudget,
       maxBudget,
+      minSubscribers,
+      maxSubscribers,
+      minApplications,
+      maxApplications,
       search,
       sortBy = 'created_desc',
     } = req.query;
@@ -262,8 +282,16 @@ router.get('/', optionalAuth, async (req, res, next) => {
     const normalizedSortBy = parseBriefSortBy(sortBy as string | string[] | undefined);
     const minBudgetValue = typeof minBudget === 'string' ? parseNumeric(minBudget) : 0;
     const maxBudgetValue = typeof maxBudget === 'string' ? parseNumeric(maxBudget) : 0;
+    const minSubscribersValue = typeof minSubscribers === 'string' ? parseNumeric(minSubscribers) : 0;
+    const maxSubscribersValue = typeof maxSubscribers === 'string' ? parseNumeric(maxSubscribers) : 0;
+    const minApplicationsValue = typeof minApplications === 'string' ? parseNumeric(minApplications) : 0;
+    const maxApplicationsValue = typeof maxApplications === 'string' ? parseNumeric(maxApplications) : 0;
     const hasMinBudget = typeof minBudget === 'string' && minBudget.trim().length > 0;
     const hasMaxBudget = typeof maxBudget === 'string' && maxBudget.trim().length > 0;
+    const hasMinSubscribers = typeof minSubscribers === 'string' && minSubscribers.trim().length > 0;
+    const hasMaxSubscribers = typeof maxSubscribers === 'string' && maxSubscribers.trim().length > 0;
+    const hasMinApplications = typeof minApplications === 'string' && minApplications.trim().length > 0;
+    const hasMaxApplications = typeof maxApplications === 'string' && maxApplications.trim().length > 0;
 
     const where = {
       status: 'ACTIVE' as const,
@@ -303,11 +331,30 @@ router.get('/', optionalAuth, async (req, res, next) => {
 
     const filteredBriefs = briefs.filter((brief: any) => {
       const budget = getBriefBudget(brief);
+      const subscribers = getBriefSubscribersMetric(brief);
+      const applications = parseNumeric(brief?._count?.applications);
+
       if (hasMinBudget && budget < minBudgetValue) {
         return false;
       }
 
       if (hasMaxBudget && budget > maxBudgetValue) {
+        return false;
+      }
+
+      if (hasMinSubscribers && subscribers < minSubscribersValue) {
+        return false;
+      }
+
+      if (hasMaxSubscribers && subscribers > maxSubscribersValue) {
+        return false;
+      }
+
+      if (hasMinApplications && applications < minApplicationsValue) {
+        return false;
+      }
+
+      if (hasMaxApplications && applications > maxApplicationsValue) {
         return false;
       }
 
