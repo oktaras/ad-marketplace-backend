@@ -553,17 +553,11 @@ function buildOpenDealChatStartUrl(dealId: string): string | null {
     return null;
   }
 
-  return `https://t.me/${username}?start=open_deal_${dealId}`;
+  return `https://t.me/${username}?start=deal_chat_${dealId}`;
 }
 
 function buildOpenDealChatUrl(dealId: string): string | null {
-  const username = config.telegramBotUsername.replace(/^@/, '').trim();
-  if (!username) {
-    return buildOpenDealChatStartUrl(dealId);
-  }
-
-  // Plain bot link avoids re-triggering /start while still opening the bot chat.
-  return `https://t.me/${username}`;
+  return buildOpenDealChatStartUrl(dealId);
 }
 
 function buildDealChatPayload(

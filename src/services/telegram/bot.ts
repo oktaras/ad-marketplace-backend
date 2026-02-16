@@ -1119,13 +1119,37 @@ function extractDealIdFromOpenCallback(data: string): string | null {
   return null;
 }
 
-function extractDealIdFromOpenStartParam(startParam: string | undefined): string | null {
-  if (!startParam || !startParam.startsWith('open_deal_')) {
+function parseDealChatStartParam(startParam: string | undefined): {
+  dealId: string;
+  forceRecovery: boolean;
+  source: 'deal_chat' | 'open_deal' | 'repair_deal';
+} | null {
+  if (!startParam) {
     return null;
   }
 
-  const dealId = startParam.slice('open_deal_'.length).trim();
-  return dealId || null;
+  if (startParam.startsWith('deal_chat_')) {
+    const dealId = startParam.slice('deal_chat_'.length).trim();
+    return dealId
+      ? { dealId, forceRecovery: false, source: 'deal_chat' }
+      : null;
+  }
+
+  if (startParam.startsWith('open_deal_')) {
+    const dealId = startParam.slice('open_deal_'.length).trim();
+    return dealId
+      ? { dealId, forceRecovery: false, source: 'open_deal' }
+      : null;
+  }
+
+  if (startParam.startsWith('repair_deal_')) {
+    const dealId = startParam.slice('repair_deal_'.length).trim();
+    return dealId
+      ? { dealId, forceRecovery: true, source: 'repair_deal' }
+      : null;
+  }
+
+  return null;
 }
 
 function parseDealIdFromCommandArg(arg: string | undefined): string | null {
@@ -1193,10 +1217,15 @@ function buildDealChatDiagnosticsText(params: {
 async function handleOpenDealChatEntry(params: {
   dealId: string;
   telegramUserId: ChatIdLike;
+  forceRecovery?: boolean;
+  forceCreateNewTopic?: boolean;
 }) {
   const result = await openDealChatInPrivateTopic({
     dealId: params.dealId,
     telegramUserId: params.telegramUserId,
+    ensureCounterpartyTopic: true,
+    ...(params.forceRecovery ? { forceRecovery: true } : {}),
+    ...(params.forceCreateNewTopic ? { forceCreateNewTopic: true } : {}),
   });
 
   return {
@@ -1566,22 +1595,25 @@ bot.use(session({
 bot.command('start', async (ctx) => {
   const startParam = ctx.match;
 
-  const openDealId = extractDealIdFromOpenStartParam(startParam);
-  if (openDealId) {
-    console.log(`Received open deal /start for deal ${openDealId} from user ${ctx.from?.id ?? 'unknown'}`);
+  const chatStart = parseDealChatStartParam(startParam);
+  if (chatStart) {
+    console.log(
+      `Received deal chat /start for deal ${chatStart.dealId} from user ${ctx.from?.id ?? 'unknown'} source=${chatStart.source}`,
+    );
     try {
       if (!ctx.from?.id) {
         throw new Error('Telegram user is not available');
       }
 
       const opened = await handleOpenDealChatEntry({
-        dealId: openDealId,
+        dealId: chatStart.dealId,
         telegramUserId: ctx.from.id,
+        ...(chatStart.forceRecovery ? { forceRecovery: true } : {}),
       });
 
       await ctx.reply(opened.statusText);
     } catch (error) {
-      console.error(`Failed to open deal chat from /start for deal ${openDealId}:`, error);
+      console.error(`Failed to open deal chat from /start for deal ${chatStart.dealId}:`, error);
       await ctx.reply('Failed to open deal chat.');
     }
     return;
