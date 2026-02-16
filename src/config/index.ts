@@ -102,6 +102,22 @@ function joinUrl(base: string, ...parts: string[]): string {
   return suffix ? `${normalizedBase}/${suffix}` : normalizedBase;
 }
 
+const deprecatedEnvVarReplacements: Record<string, string> = {
+  TON_ENDPOINT: 'TON_CENTER_API_URL',
+  TON_API_KEY: 'TON_CENTER_API_KEY',
+  PLATFORM_WALLET_ADDRESS: 'PLATFORM_FEE_WALLET_ADDRESS',
+  WEB_APP_URL: 'MINI_APP_BASE_URL',
+  PLATFORM_FEE_PERCENT: 'PLATFORM_FEE_BPS',
+};
+
+for (const [deprecatedKey, replacementKey] of Object.entries(deprecatedEnvVarReplacements)) {
+  if (process.env[deprecatedKey] !== undefined) {
+    throw new Error(
+      `Deprecated environment variable "${deprecatedKey}" is not supported. Use "${replacementKey}" instead.`,
+    );
+  }
+}
+
 const supportedCurrencies = (() => {
   const parsed = parseCurrencyList(process.env.SUPPORTED_CURRENCIES);
   return parsed.length > 0 ? parsed : ['TON'];
@@ -165,7 +181,7 @@ export const config = {
   // Telegram
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramBotUsername: process.env.TELEGRAM_BOT_USERNAME || '',
-  miniAppBaseUrl: process.env.MINI_APP_BASE_URL || process.env.WEB_APP_URL || 'http://localhost:5173',
+  miniAppBaseUrl: process.env.MINI_APP_BASE_URL || 'http://localhost:5173',
   telegramApiId: parseInt(process.env.TELEGRAM_API_ID || '0', 10),
   telegramApiHash: process.env.TELEGRAM_API_HASH || '',
   mtprotoSessionEncryptionKey: process.env.MTPROTO_SESSION_ENCRYPTION_KEY || '',
@@ -178,11 +194,11 @@ export const config = {
   
   // TON
   tonNetwork: (process.env.TON_NETWORK || 'testnet') as 'mainnet' | 'testnet',
-  tonCenterApiUrl: process.env.TON_ENDPOINT || process.env.TON_CENTER_API_URL || 'https://testnet.toncenter.com/api/v2/jsonRPC',
-  tonCenterApiKey: process.env.TON_API_KEY || process.env.TON_CENTER_API_KEY || '',
+  tonCenterApiUrl: process.env.TON_CENTER_API_URL || 'https://testnet.toncenter.com/api/v2/jsonRPC',
+  tonCenterApiKey: process.env.TON_CENTER_API_KEY || '',
   
   // Platform wallets
-  platformFeeWalletAddress: process.env.PLATFORM_WALLET_ADDRESS || process.env.PLATFORM_FEE_WALLET_ADDRESS || '',
+  platformFeeWalletAddress: process.env.PLATFORM_FEE_WALLET_ADDRESS || '',
   platformMnemonic: process.env.PLATFORM_MNEMONIC || '',
   
   // Backend wallet (for creating escrow deals via factory)
@@ -194,7 +210,6 @@ export const config = {
   
   // Commission
   platformFeeBps: parseInt(process.env.PLATFORM_FEE_BPS || '500', 10), // 5% default
-  platformFeePercent: parseInt(process.env.PLATFORM_FEE_PERCENT || '5', 10),
   
   // Verification
   verificationSignerSecret: process.env.VERIFICATION_SIGNER_SECRET || '',

@@ -107,19 +107,19 @@ docker exec ads-marketplace-db psql -U postgres ads_marketplace -c "SELECT * FRO
 1. ✅ Database migrated and seeded
 2. 🔜 Start backend server: `npm run dev`
 3. 🔜 Create Telegram bot with @BotFather
-4. 🔜 Add `TELEGRAM_BOT_TOKEN` to `.env`
+4. 🔜 Add `TELEGRAM_BOT_TOKEN` to `backend/.env`
 5. 🔜 Test API endpoints
 6. 🔜 Integrate with smart contracts
 
 ## Backend Environment
 
-Make sure `/Users/taras/tg/ads-marketplace/backend/.env` contains:
+Copy `backend/.env.example` to `backend/.env`, then make sure it contains:
 
 ```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ads_marketplace
 ESCROW_FACTORY_ADDRESS=kQCLoCFOAzc0UTrzheBXZcJft-HgBXk0DRGlqx_95N544-ZJ
 BACKEND_WALLET_ADDRESS=0QCzMcE6f9AnEpbIMuUY02RPDay7PpT5tTLNs4s-mj26sGIx
-PLATFORM_WALLET_ADDRESS=0QCHRRVXZug-SRoRZFbG76rhkOkwjNvS1uIaRbJ-w9PmQN7k
+PLATFORM_FEE_WALLET_ADDRESS=0QCHRRVXZug-SRoRZFbG76rhkOkwjNvS1uIaRbJ-w9PmQN7k
 ```
 
 ## Database ERD
