@@ -374,12 +374,17 @@ async function canDeliverToThread(chatId: bigint, threadId: bigint): Promise<boo
     const probePayload = probe as unknown as Record<string, unknown>;
 
     const deliveredThreadId = extractIncomingThreadId(probePayload);
-    const deliveredToExpectedThread = deliveredThreadId !== null && deliveredThreadId === threadId;
+    const hasThreadMetadata = deliveredThreadId !== null;
+    const deliveredToExpectedThread = !hasThreadMetadata || deliveredThreadId === threadId;
     if (!deliveredToExpectedThread) {
       console.warn(
         `[deal-chat] probe mismatch chatId=${chatId.toString()} expectedThreadId=${threadId.toString()} actualThreadId=${deliveredThreadId?.toString() ?? 'null'}`,
       );
       topicThreadParamPreference.delete(chatId.toString());
+    } else if (!hasThreadMetadata) {
+      console.info(
+        `[deal-chat] probe thread metadata missing chatId=${chatId.toString()} expectedThreadId=${threadId.toString()} assuming-deliverable=true`,
+      );
     }
 
     const probeMessageId = typeof probePayload.message_id === 'number' && Number.isFinite(probePayload.message_id)
@@ -1223,7 +1228,6 @@ async function handleOpenDealChatEntry(params: {
   const result = await openDealChatInPrivateTopic({
     dealId: params.dealId,
     telegramUserId: params.telegramUserId,
-    ensureCounterpartyTopic: true,
     ...(params.forceRecovery ? { forceRecovery: true } : {}),
     ...(params.forceCreateNewTopic ? { forceCreateNewTopic: true } : {}),
   });

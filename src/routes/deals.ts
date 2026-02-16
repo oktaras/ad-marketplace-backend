@@ -17,7 +17,7 @@ import { dealService } from '../services/deal/index.js';
 import { escrowService } from '../services/escrow/index.js';
 import { appEvents, AppEvent } from '../services/events.js';
 import { jobQueue, JobType } from '../services/jobs/index.js';
-import { buildTopicOpenUrlForParticipant, openDealChatInPrivateTopic } from '../services/telegram/bot.js';
+import { openDealChatInPrivateTopic } from '../services/telegram/bot.js';
 import { normalizeCurrencyInput, requiredCurrencySchema } from '../lib/currency.js';
 import {
   createPresignedS3ReadUrl,
@@ -557,7 +557,13 @@ function buildOpenDealChatStartUrl(dealId: string): string | null {
 }
 
 function buildOpenDealChatUrl(dealId: string): string | null {
-  return buildOpenDealChatStartUrl(dealId);
+  const username = config.telegramBotUsername.replace(/^@/, '').trim();
+  if (!username) {
+    return buildOpenDealChatStartUrl(dealId);
+  }
+
+  // Open plain bot chat; topic creation/repair is handled by /open-chat API beforehand.
+  return `https://t.me/${username}`;
 }
 
 function buildDealChatPayload(
@@ -1864,30 +1870,11 @@ router.post('/:id/open-chat', telegramAuth, async (req, res, next) => {
     const opened = await openDealChatInPrivateTopic({
       dealId,
       telegramUserId: req.user!.telegramId,
-      ensureCounterpartyTopic: true,
     });
-    let openDealChatUrl = buildOpenDealChatUrl(dealId);
-    let urlMode: 'topic-anchor' | 'bot' | 'start' = openDealChatUrl?.includes('?start=')
+    const openDealChatUrl = buildOpenDealChatUrl(dealId);
+    const urlMode: 'bot' | 'start' = openDealChatUrl?.includes('?start=')
       ? 'start'
       : 'bot';
-
-    if (opened.threadId !== null) {
-      try {
-        const topicUrl = await buildTopicOpenUrlForParticipant({
-          chatId: req.user!.telegramId,
-          threadId: opened.threadId,
-        });
-        if (topicUrl) {
-          openDealChatUrl = topicUrl;
-          urlMode = 'topic-anchor';
-        }
-      } catch (topicUrlError) {
-        console.warn(
-          `[deal-chat] open-chat endpoint topic-link failed dealId=${dealId} user=${req.user!.telegramId.toString()} threadId=${opened.threadId.toString()}`,
-          topicUrlError,
-        );
-      }
-    }
 
     console.info(
       `[deal-chat] open-chat endpoint resolved-url dealId=${dealId} user=${req.user!.telegramId.toString()} threadId=${opened.threadId?.toString() ?? 'null'} mode=${urlMode} url=${openDealChatUrl ?? 'null'}`,
