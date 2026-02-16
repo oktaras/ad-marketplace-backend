@@ -1095,16 +1095,29 @@ function buildDealChatDiagnosticsText(params: {
   threadId: bigint | null;
   counterpartyThreadId: bigint | null;
   needsThreadCreation: boolean;
+  myTopicDeliverability: 'ok' | 'missing' | 'error' | 'not_set';
+  myTopicDeliverabilityDetail: string | null;
 }): string {
-  return [
+  const lines = [
     'Deal chat diagnostics:',
     `Deal ID: ${params.dealId}`,
     `Side: ${params.participantSide}`,
     `Status: ${params.status}`,
     `My topic thread: ${params.threadId?.toString() ?? 'null'}`,
+    `My topic deliverability: ${params.myTopicDeliverability}`,
     `Counterparty thread: ${params.counterpartyThreadId?.toString() ?? 'null'}`,
     `Needs topic creation: ${params.needsThreadCreation ? 'yes' : 'no'}`,
-  ].join('\n');
+  ];
+
+  if (params.myTopicDeliverabilityDetail) {
+    lines.push(`My topic check detail: ${params.myTopicDeliverabilityDetail}`);
+  }
+
+  if (params.myTopicDeliverability === 'missing' && !params.needsThreadCreation) {
+    lines.push('Diagnosis: DB still points to a missing topic. Use /repairchat <deal_id>.');
+  }
+
+  return lines.join('\n');
 }
 
 async function handleOpenDealChatEntry(params: {
@@ -1211,7 +1224,11 @@ async function ensureParticipantTopic(params: {
     }
 
     if (existingThreadId !== null) {
-      const reachable = await isThreadReachable(chatId, existingThreadId);
+      // For creation/recovery paths, verify real deliverability (send + cleanup probe),
+      // because chat-action checks can report false positives for deleted topics.
+      const reachable = shouldRecreateOnUnreachable
+        ? await canDeliverToThread(chatId, existingThreadId)
+        : await isThreadReachable(chatId, existingThreadId);
       const withinRecentGraceWindow = !bypassRecentGraceWindow
         && isRecentDateWithinMs(existingOpenedAt, TOPIC_RECENT_GRACE_MS);
       if (!reachable && shouldRecreateOnUnreachable && withinRecentGraceWindow) {
@@ -1305,7 +1322,9 @@ async function ensureParticipantTopic(params: {
     }
 
     if (bindResult.threadId !== null) {
-      const reachable = await isThreadReachable(chatId, bindResult.threadId);
+      const reachable = shouldRecreateOnUnreachable
+        ? await canDeliverToThread(chatId, bindResult.threadId)
+        : await isThreadReachable(chatId, bindResult.threadId);
       if (reachable || !shouldRecreateOnUnreachable) {
         return {
           chatId,
@@ -1546,6 +1565,11 @@ bot.command('repairchat', async (ctx) => {
 });
 
 bot.command('chatdiag', async (ctx) => {
+  if (!ctx.chat || ctx.chat.type !== 'private') {
+    await ctx.reply('Use /chatdiag in a private chat with the bot.');
+    return;
+  }
+
   const dealId = parseDealIdFromCommandArg(ctx.match);
   if (!dealId) {
     await ctx.reply('Usage: /chatdiag <deal_id>');
@@ -1561,6 +1585,20 @@ bot.command('chatdiag', async (ctx) => {
       dealId,
       telegramUserId: ctx.from.id,
     });
+    const myChatId = parsePositiveBigInt(ctx.chat.id, 'chatId');
+    let myTopicDeliverability: 'ok' | 'missing' | 'error' | 'not_set' = 'not_set';
+    let myTopicDeliverabilityDetail: string | null = null;
+
+    if (state.threadId !== null) {
+      try {
+        const deliverable = await canDeliverToThread(myChatId, state.threadId);
+        myTopicDeliverability = deliverable ? 'ok' : 'missing';
+      } catch (probeError) {
+        myTopicDeliverability = 'error';
+        myTopicDeliverabilityDetail = extractErrorText(probeError);
+      }
+    }
+
     await ctx.reply(buildDealChatDiagnosticsText({
       dealId,
       status: state.status,
@@ -1568,6 +1606,8 @@ bot.command('chatdiag', async (ctx) => {
       threadId: state.threadId,
       counterpartyThreadId: state.counterpartyThreadId,
       needsThreadCreation: state.needsThreadCreation,
+      myTopicDeliverability,
+      myTopicDeliverabilityDetail,
     }));
   } catch (error) {
     console.error(`Failed to load deal chat diagnostics from /chatdiag for deal ${dealId}:`, error);
