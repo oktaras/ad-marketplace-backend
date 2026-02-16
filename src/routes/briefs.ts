@@ -196,6 +196,21 @@ function compareBriefs(a: any, b: any, sortBy: BriefSortBy): number {
   }
 }
 
+function sanitizeBriefAdvertiserPayload(
+  advertiser: { id?: string } | null | undefined,
+): { id: string; username: null; firstName: null; photoUrl: null } | null {
+  if (!advertiser?.id) {
+    return null;
+  }
+
+  return {
+    id: advertiser.id,
+    username: null,
+    firstName: null,
+    photoUrl: null,
+  };
+}
+
 /**
  * @openapi
  * /api/briefs:
@@ -305,8 +320,6 @@ router.get('/', optionalAuth, async (req, res, next) => {
         OR: [
           { title: { contains: searchQuery, mode: 'insensitive' as const } },
           { description: { contains: searchQuery, mode: 'insensitive' as const } },
-          { advertiser: { username: { contains: searchQuery, mode: 'insensitive' as const } } },
-          { advertiser: { firstName: { contains: searchQuery, mode: 'insensitive' as const } } },
         ],
       }),
     };
@@ -317,9 +330,6 @@ router.get('/', optionalAuth, async (req, res, next) => {
         advertiser: {
           select: {
             id: true,
-            username: true,
-            firstName: true,
-            photoUrl: true,
           },
         },
         _count: {
@@ -385,7 +395,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
         flexibility: b.flexibility,
         hasCreative: b.hasCreative,
         status: b.status,
-        advertiser: b.advertiser,
+        advertiser: sanitizeBriefAdvertiserPayload(b.advertiser),
         applicationCount: b._count.applications,
         savedChannelsCount: b._count.savedChannels,
         createdAt: b.createdAt,
@@ -473,9 +483,6 @@ router.get('/my', telegramAuth, async (req, res, next) => {
         advertiser: {
           select: {
             id: true,
-            username: true,
-            firstName: true,
-            photoUrl: true,
           },
         },
         _count: {
@@ -505,7 +512,7 @@ router.get('/my', telegramAuth, async (req, res, next) => {
         currency: b.currency,
         desiredEndDate: b.desiredEndDate,
         status: b.status,
-        advertiser: b.advertiser,
+        advertiser: sanitizeBriefAdvertiserPayload(b.advertiser),
         applicationCount: b._count.applications,
         savedChannelsCount: b._count.savedChannels,
         createdAt: b.createdAt,
@@ -710,9 +717,6 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
         advertiser: {
           select: {
             id: true,
-            username: true,
-            firstName: true,
-            photoUrl: true,
           },
         },
         _count: {
@@ -728,6 +732,7 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
     res.json({
       brief: {
         ...brief,
+        advertiser: sanitizeBriefAdvertiserPayload(brief.advertiser),
         savedChannelsCount: brief._count.savedChannels,
       },
     });

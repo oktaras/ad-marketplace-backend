@@ -1075,6 +1075,7 @@ router.get('/', telegramAuth, async (req, res, next) => {
             select: {
               id: true,
               title: true,
+              description: true,
             },
           },
         },
@@ -1519,6 +1520,7 @@ router.get('/:id', telegramAuth, async (req, res, next) => {
           select: {
             id: true,
             title: true,
+            description: true,
           },
         },
       },

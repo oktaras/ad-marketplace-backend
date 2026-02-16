@@ -139,7 +139,9 @@ async function getOwnedChannel(channelId: string, ownerId: string) {
     select: {
       id: true,
       ownerId: true,
+      telegramChatId: true,
       username: true,
+      title: true,
       deletedAt: true,
     },
   });
@@ -342,6 +344,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
         description: ch.description,
         language: ch.language,
         isVerified: ch.isVerified,
+        updatedAt: ch.updatedAt,
         categories: ch.categories.map((c: any) => ({ slug: c.slug, name: c.name, icon: c.icon })),
         stats: ch.currentStats
           ? {
@@ -473,6 +476,7 @@ router.get('/my', telegramAuth, async (req, res, next) => {
         language: ch.language,
         status: ch.status,
         isVerified: ch.isVerified,
+        updatedAt: ch.updatedAt,
         categories: ch.categories.map((c: any) => ({ slug: c.slug, name: c.name, icon: c.icon })),
         stats: ch.currentStats
           ? {
@@ -1111,6 +1115,84 @@ router.post('/:id/stats/refresh', telegramAuth, async (req, res, next) => {
     res.status(202).json({
       message: 'Channel stats refresh queued',
       jobId: job.id,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/channels/{id}/profile/refresh:
+ *   post:
+ *     tags: [Channels]
+ *     summary: Refresh channel profile metadata from Telegram (owner only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Channel ID
+ *     responses:
+ *       200:
+ *         description: Channel profile refreshed
+ *       403:
+ *         description: Not channel owner
+ *       404:
+ *         description: Channel not found
+ */
+router.post('/:id/profile/refresh', telegramAuth, async (req, res, next) => {
+  try {
+    const channelId = getSingleParam(req.params.id);
+    const channel = await getOwnedChannel(channelId, req.user!.id);
+
+    let chat;
+    try {
+      chat = await bot.api.getChat(channel.telegramChatId);
+    } catch (error: any) {
+      if (error?.error_code === 400) {
+        throw new ValidationError('Channel not found or bot is not added to the channel');
+      }
+
+      throw new ValidationError('Failed to fetch latest channel profile from Telegram');
+    }
+
+    if (chat.type !== 'channel') {
+      throw new ValidationError('This is not a channel');
+    }
+
+    const titleFromTelegram = 'title' in chat && typeof chat.title === 'string'
+      ? chat.title.trim()
+      : '';
+    const usernameFromTelegram = 'username' in chat && typeof chat.username === 'string'
+      ? chat.username.trim()
+      : '';
+    const descriptionFromTelegram = 'description' in chat && typeof chat.description === 'string'
+      ? chat.description.trim()
+      : '';
+
+    const updatedChannel = await prisma.channel.update({
+      where: { id: channel.id },
+      data: {
+        title: titleFromTelegram || channel.title,
+        username: usernameFromTelegram || null,
+        description: descriptionFromTelegram || null,
+      },
+      select: {
+        id: true,
+        username: true,
+        title: true,
+        description: true,
+        updatedAt: true,
+      },
+    });
+
+    res.json({
+      message: 'Channel profile refreshed',
+      channel: updatedChannel,
     });
   } catch (error) {
     next(error);
