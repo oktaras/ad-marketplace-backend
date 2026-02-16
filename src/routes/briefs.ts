@@ -668,7 +668,10 @@ router.post('/', telegramAuth, async (req, res, next) => {
     if (!req.user!.isAdvertiser) {
       await prisma.user.update({
         where: { id: req.user!.id },
-        data: { isAdvertiser: true },
+        data: {
+          isAdvertiser: true,
+          ...(req.user!.onboardingCompletedAt ? {} : { onboardingCompletedAt: new Date() }),
+        },
       });
     }
 

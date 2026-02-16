@@ -714,6 +714,18 @@ function isBotCommandMessage(ctx: BotContext): boolean {
   return commandCandidate.startsWith('/');
 }
 
+function isContactSharingMessage(ctx: BotContext): boolean {
+  const message = ctx.message;
+  if (!message) {
+    return false;
+  }
+  return (
+    'contact' in message
+    || 'users_shared' in message
+    || 'chat_shared' in message
+  );
+}
+
 async function resolveCounterpartyChatId(
   dealId: string,
   toSide: 'ADVERTISER' | 'PUBLISHER',
@@ -1281,6 +1293,11 @@ bot.on('message', async (ctx) => {
   }
 
   if (isBotCommandMessage(ctx)) {
+    return;
+  }
+
+  // Do not auto-reply to contact-sharing payloads.
+  if (isContactSharingMessage(ctx)) {
     return;
   }
 

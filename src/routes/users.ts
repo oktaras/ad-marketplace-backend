@@ -124,6 +124,7 @@ router.get('/me', telegramAuth, async (req, res) => {
 router.put('/me', telegramAuth, async (req, res, next) => {
   try {
     const { isAdvertiser, isChannelOwner, languageCode } = req.body;
+    const currentUser = req.user!;
 
     // If both flags are provided, user must keep at least one role enabled.
     if (typeof isAdvertiser === 'boolean' && typeof isChannelOwner === 'boolean') {
@@ -132,12 +133,18 @@ router.put('/me', telegramAuth, async (req, res, next) => {
       }
     }
 
+    const nextIsAdvertiser = typeof isAdvertiser === 'boolean' ? isAdvertiser : currentUser.isAdvertiser;
+    const nextIsChannelOwner = typeof isChannelOwner === 'boolean' ? isChannelOwner : currentUser.isChannelOwner;
+    const shouldMarkOnboardingCompletedAt =
+      (nextIsAdvertiser || nextIsChannelOwner) && !currentUser.onboardingCompletedAt;
+
     const user = await prisma.user.update({
-      where: { id: req.user!.id },
+      where: { id: currentUser.id },
       data: {
         ...(typeof isAdvertiser === 'boolean' && { isAdvertiser }),
         ...(typeof isChannelOwner === 'boolean' && { isChannelOwner }),
         ...(languageCode && { languageCode }),
+        ...(shouldMarkOnboardingCompletedAt && { onboardingCompletedAt: new Date() }),
       },
     });
 

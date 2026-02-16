@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
+  AdFormatType,
   DealChatStatus,
   DealStatus,
+  EscrowStatus,
   PostingPlanActor,
   PostingPlanMethod,
   PostingPlanProposalStatus,
@@ -238,11 +240,44 @@ function getMultiParam(value: string | string[] | undefined): string[] {
 }
 
 const DEAL_STATUS_SET = new Set<DealStatus>(Object.values(DealStatus));
+const ESCROW_STATUS_SET = new Set<EscrowStatus>(Object.values(EscrowStatus));
+const AD_FORMAT_TYPE_SET = new Set<AdFormatType>(Object.values(AdFormatType));
+
+const DEAL_LIST_SORT_VALUES = [
+  'created_desc',
+  'created_asc',
+  'updated_desc',
+  'updated_asc',
+] as const;
+
+type DealListSort = typeof DEAL_LIST_SORT_VALUES[number];
+const DEAL_LIST_SORT_SET = new Set<DealListSort>(DEAL_LIST_SORT_VALUES);
 
 function parseDealStatuses(value: string | string[] | undefined): DealStatus[] {
   return getMultiParam(value)
     .map((entry) => entry.toUpperCase())
     .filter((entry): entry is DealStatus => DEAL_STATUS_SET.has(entry as DealStatus));
+}
+
+function parseEscrowStatuses(value: string | string[] | undefined): EscrowStatus[] {
+  return getMultiParam(value)
+    .map((entry) => entry.toUpperCase())
+    .filter((entry): entry is EscrowStatus => ESCROW_STATUS_SET.has(entry as EscrowStatus));
+}
+
+function parseAdFormatTypes(value: string | string[] | undefined): AdFormatType[] {
+  return getMultiParam(value)
+    .map((entry) => entry.toUpperCase())
+    .filter((entry): entry is AdFormatType => AD_FORMAT_TYPE_SET.has(entry as AdFormatType));
+}
+
+function parseDealListSort(value: string | string[] | undefined): DealListSort {
+  const normalized = getSingleParam(value).trim().toLowerCase();
+  if (DEAL_LIST_SORT_SET.has(normalized as DealListSort)) {
+    return normalized as DealListSort;
+  }
+
+  return 'created_desc';
 }
 
 const CREATIVE_MEDIA_TYPE_VALUES = ['TEXT', 'IMAGE', 'VIDEO', 'GIF', 'DOCUMENT', 'AUDIO', 'POLL'] as const;
@@ -970,6 +1005,10 @@ router.get('/', telegramAuth, async (req, res, next) => {
   try {
     const roleValue = getSingleParam(req.query.role as string | string[] | undefined);
     const statusRaw = req.query.status as string | string[] | undefined;
+    const escrowStatusRaw = req.query.escrowStatus as string | string[] | undefined;
+    const adFormatTypeRaw = req.query.adFormatType as string | string[] | undefined;
+    const searchRaw = getSingleParam(req.query.search as string | string[] | undefined).trim();
+    const sortBy = parseDealListSort(req.query.sort as string | string[] | undefined);
     const pageValue = getSingleParam(req.query.page as string | string[] | undefined) || '1';
     const limitValue = getSingleParam(req.query.limit as string | string[] | undefined) || '20';
 
@@ -980,6 +1019,16 @@ router.get('/', telegramAuth, async (req, res, next) => {
     const statusFilter = parseDealStatuses(statusRaw);
     if (statusRaw !== undefined && statusFilter.length === 0) {
       throw new ValidationError('Invalid status filter');
+    }
+
+    const escrowStatusFilter = parseEscrowStatuses(escrowStatusRaw);
+    if (escrowStatusRaw !== undefined && escrowStatusFilter.length === 0) {
+      throw new ValidationError('Invalid escrow status filter');
+    }
+
+    const adFormatTypeFilter = parseAdFormatTypes(adFormatTypeRaw);
+    if (adFormatTypeRaw !== undefined && adFormatTypeFilter.length === 0) {
+      throw new ValidationError('Invalid ad format type filter');
     }
 
     const baseWhere =
@@ -994,15 +1043,79 @@ router.get('/', telegramAuth, async (req, res, next) => {
               ],
             };
 
+    const filterAnd: any[] = [];
+
+    if (statusFilter.length > 0) {
+      filterAnd.push({ status: { in: statusFilter } });
+    }
+
+    if (escrowStatusFilter.length > 0) {
+      filterAnd.push({ escrowStatus: { in: escrowStatusFilter } });
+    }
+
+    if (adFormatTypeFilter.length > 0) {
+      filterAnd.push({
+        adFormat: {
+          type: { in: adFormatTypeFilter },
+        },
+      });
+    }
+
+    if (searchRaw.length > 0) {
+      filterAnd.push({
+        OR: [
+          { id: { contains: searchRaw, mode: 'insensitive' } },
+          {
+            channel: {
+              title: { contains: searchRaw, mode: 'insensitive' },
+            },
+          },
+          {
+            channel: {
+              username: { contains: searchRaw, mode: 'insensitive' },
+            },
+          },
+          {
+            adFormat: {
+              name: { contains: searchRaw, mode: 'insensitive' },
+            },
+          },
+          {
+            brief: {
+              is: {
+                title: { contains: searchRaw, mode: 'insensitive' },
+              },
+            },
+          },
+          {
+            brief: {
+              is: {
+                description: { contains: searchRaw, mode: 'insensitive' },
+              },
+            },
+          },
+        ],
+      });
+    }
+
     const where = {
       ...baseWhere,
-      ...(statusFilter.length > 0 ? { status: { in: statusFilter } } : {}),
+      ...(filterAnd.length > 0 ? { AND: filterAnd } : {}),
     };
+
+    const orderBy =
+      sortBy === 'created_asc'
+        ? { createdAt: 'asc' as const }
+        : sortBy === 'updated_desc'
+          ? { updatedAt: 'desc' as const }
+          : sortBy === 'updated_asc'
+            ? { updatedAt: 'asc' as const }
+            : { createdAt: 'desc' as const };
 
     const [deals, total, groupedStatusCounts] = await Promise.all([
       prisma.deal.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: parsedLimit,
         select: {

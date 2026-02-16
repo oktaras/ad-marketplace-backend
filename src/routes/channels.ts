@@ -1447,7 +1447,10 @@ router.post('/verify-and-add', telegramAuth, async (req, res, next) => {
     if (!req.user!.isChannelOwner) {
       await prisma.user.update({
         where: { id: req.user!.id },
-        data: { isChannelOwner: true },
+        data: {
+          isChannelOwner: true,
+          ...(req.user!.onboardingCompletedAt ? {} : { onboardingCompletedAt: new Date() }),
+        },
       });
     }
 
@@ -1576,7 +1579,10 @@ router.post('/', telegramAuth, async (req, res, next) => {
     if (!req.user!.isChannelOwner) {
       await prisma.user.update({
         where: { id: req.user!.id },
-        data: { isChannelOwner: true },
+        data: {
+          isChannelOwner: true,
+          ...(req.user!.onboardingCompletedAt ? {} : { onboardingCompletedAt: new Date() }),
+        },
       });
     }
 
