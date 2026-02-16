@@ -1269,10 +1269,22 @@ export async function openDealChatInPrivateTopic(params: {
   let topicCreated = false;
 
   if (initial.status !== DealChatStatus.CLOSED) {
-    const ensured = await ensureParticipantTopic({
+    let ensured = await ensureParticipantTopic({
       dealId: params.dealId,
       side: initial.participantSide as DealChatParticipantSide,
     });
+
+    // If open-chat sees a known unreachable thread (typically deleted topic) that is still inside
+    // the grace window, force one recovery pass so users don't get "chat is active" with no topic.
+    if (!ensured.reachable && ensured.threadId !== null) {
+      console.warn(
+        `[deal-chat] open-flow forcing topic recovery dealId=${params.dealId} side=${initial.participantSide} staleThreadId=${ensured.threadId.toString()}`,
+      );
+      ensured = await ensureParticipantTopic(
+        buildRecoveryEnsureParticipantTopicParams(params.dealId, initial.participantSide as DealChatParticipantSide),
+      );
+    }
+
     topicCreated = ensured.recreated;
 
     finalState = await dealChatService.openDealChatForUser({
