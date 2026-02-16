@@ -547,13 +547,61 @@ const TERMINAL_DEAL_STATUSES = new Set<DealStatus>([
   DealStatus.RESOLVED,
 ]);
 
-function buildOpenDealChatUrl(dealId: string): string | null {
+function buildOpenDealChatStartUrl(dealId: string): string | null {
   const username = config.telegramBotUsername.replace(/^@/, '').trim();
   if (!username) {
     return null;
   }
 
   return `https://t.me/${username}?start=open_deal_${dealId}`;
+}
+
+function buildOpenDealTopicUrl(threadId: bigint): string | null {
+  const username = config.telegramBotUsername.replace(/^@/, '').trim();
+  if (!username) {
+    return null;
+  }
+
+  const topicId = threadId.toString();
+  // Topic links use message-link syntax; topic ID equals the topic-create service message ID.
+  return `https://t.me/${username}/${topicId}?thread=${topicId}`;
+}
+
+function buildOpenDealChatUrl(dealId: string, threadId?: bigint | null): string | null {
+  if (threadId !== undefined && threadId !== null) {
+    const topicUrl = buildOpenDealTopicUrl(threadId);
+    if (topicUrl) {
+      return topicUrl;
+    }
+  }
+
+  return buildOpenDealChatStartUrl(dealId);
+}
+
+function resolveViewerDealThreadId(
+  deal: {
+    advertiserId: string;
+    channelOwnerId: string;
+    dealChatBridge?: {
+      advertiserThreadId: bigint | null;
+      publisherThreadId: bigint | null;
+    } | null;
+  },
+  userId: string,
+): bigint | null {
+  if (!deal.dealChatBridge) {
+    return null;
+  }
+
+  if (deal.advertiserId === userId) {
+    return deal.dealChatBridge.advertiserThreadId ?? null;
+  }
+
+  if (deal.channelOwnerId === userId) {
+    return deal.dealChatBridge.publisherThreadId ?? null;
+  }
+
+  return null;
 }
 
 function buildDealChatPayload(
@@ -709,6 +757,7 @@ function toOverviewDeal(deal: any, userId: string) {
   const deadlines = dealService.getDealDeadlineInfo(deal);
   const dealChat = buildDealChatPayload(deal, userId);
   const redactAdvertiser = shouldRedactAdvertiserForViewer(deal, userId);
+  const viewerThreadId = resolveViewerDealThreadId(deal, userId);
 
   return {
     id: deal.id,
@@ -739,7 +788,7 @@ function toOverviewDeal(deal: any, userId: string) {
     adFormat: deal.adFormat,
     brief: deal.brief,
     dealChat,
-    openDealChatUrl: buildOpenDealChatUrl(deal.id),
+    openDealChatUrl: buildOpenDealChatUrl(deal.id, viewerThreadId),
     availableActions,
     deadlines,
     isAdvertiser: deal.advertiserId === userId,
@@ -1860,7 +1909,12 @@ router.post('/:id/open-chat', telegramAuth, async (req, res, next) => {
     const opened = await openDealChatInPrivateTopic({
       dealId,
       telegramUserId: req.user!.telegramId,
+      ensureCounterpartyTopic: true,
     });
+    const openDealChatUrl = buildOpenDealChatUrl(dealId, opened.threadId);
+    console.info(
+      `[deal-chat] open-chat endpoint resolved-url dealId=${dealId} user=${req.user!.telegramId.toString()} threadId=${opened.threadId?.toString() ?? 'null'} mode=${opened.threadId ? 'topic' : 'start'} url=${openDealChatUrl ?? 'null'}`,
+    );
 
     res.json({
       ok: true,
@@ -1871,7 +1925,7 @@ router.post('/:id/open-chat', telegramAuth, async (req, res, next) => {
         openedByCounterparty: opened.counterpartyThreadId !== null,
         isOpenable: opened.status !== 'CLOSED',
       },
-      openDealChatUrl: buildOpenDealChatUrl(dealId),
+      openDealChatUrl,
     });
   } catch (error) {
     next(error);

@@ -82,6 +82,10 @@ function formatParticipantRoleLabel(side: DealChatParticipantSide): string {
   return side === 'ADVERTISER' ? 'Advertiser' : 'Publisher';
 }
 
+function getCounterpartySide(side: DealChatParticipantSide): DealChatParticipantSide {
+  return side === 'ADVERTISER' ? 'PUBLISHER' : 'ADVERTISER';
+}
+
 function withRolePrefix(roleLabel: string, value: string): string {
   const normalized = value.trim();
   if (!normalized) {
@@ -1369,6 +1373,7 @@ export async function openDealChatInPrivateTopic(params: {
   telegramUserId: ChatIdLike;
   forceRecovery?: boolean;
   forceCreateNewTopic?: boolean;
+  ensureCounterpartyTopic?: boolean;
 }) {
   const telegramUserId = parsePositiveBigInt(params.telegramUserId, 'telegramUserId');
   const initial = await dealChatService.openDealChatForUser({
@@ -1433,6 +1438,23 @@ export async function openDealChatInPrivateTopic(params: {
             probeError,
           );
         }
+      }
+    }
+
+    if (params.ensureCounterpartyTopic) {
+      const counterpartySide = getCounterpartySide(participantSide);
+      try {
+        const counterpartyEnsured = await ensureParticipantTopic({
+          ...buildRecoveryEnsureParticipantTopicParams(params.dealId, counterpartySide),
+        });
+        console.info(
+          `[deal-chat] open-flow counterparty ensure result dealId=${params.dealId} side=${counterpartySide} recreated=${counterpartyEnsured.recreated ? 'true' : 'false'} reachable=${counterpartyEnsured.reachable ? 'true' : 'false'} threadId=${counterpartyEnsured.threadId.toString()}`,
+        );
+      } catch (counterpartyError) {
+        console.warn(
+          `[deal-chat] open-flow counterparty ensure failed dealId=${params.dealId} side=${counterpartySide}`,
+          counterpartyError,
+        );
       }
     }
 
