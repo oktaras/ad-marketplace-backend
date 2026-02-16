@@ -88,6 +88,22 @@ export type RebindThreadForParticipantResult = {
   counterpartyThreadId: bigint | null;
 };
 
+export type BindThreadForParticipantWithExpectationInput = {
+  dealId: string;
+  side: ParticipantSide;
+  candidateThreadId: IdLike;
+  expectedThreadId: IdLike | null;
+};
+
+export type BindThreadForParticipantWithExpectationResult = {
+  dealId: string;
+  side: ParticipantSide;
+  status: DealChatStatus;
+  threadId: bigint | null;
+  counterpartyThreadId: bigint | null;
+  applied: boolean;
+};
+
 const LOCK_SIDE_KEY: Record<ParticipantSide | 'GLOBAL', number> = {
   GLOBAL: 11,
   ADVERTISER: 101,
@@ -356,7 +372,7 @@ export async function resolveRouteByIncomingThread(
     return null;
   }
 
-  const bridge = await prisma.dealChatBridge.findFirst({
+  const matches = await prisma.dealChatBridge.findMany({
     where: {
       OR: [
         {
@@ -369,11 +385,20 @@ export async function resolveRouteByIncomingThread(
         },
       ],
     },
+    take: 2,
+    orderBy: [
+      { updatedAt: 'desc' },
+      { createdAt: 'desc' },
+      { id: 'asc' },
+    ],
     select: {
+      id: true,
       dealId: true,
       status: true,
       advertiserThreadId: true,
       publisherThreadId: true,
+      updatedAt: true,
+      createdAt: true,
       deal: {
         select: {
           advertiserId: true,
@@ -384,6 +409,13 @@ export async function resolveRouteByIncomingThread(
     },
   });
 
+  if (matches.length > 1) {
+    console.error(
+      `[deal-chat] severity=high event=ambiguous-route-candidates telegramUserId=${telegramUserId.toString()} messageThreadId=${messageThreadId.toString()} dealIds=${matches.map((entry) => entry.dealId).join(',')}`,
+    );
+  }
+
+  const bridge = matches[0] ?? null;
   if (!bridge) {
     return null;
   }
@@ -413,7 +445,7 @@ export async function resolveRouteByIncomingThread(
 
   if (canonicalStatus !== bridge.status) {
     await prisma.dealChatBridge.update({
-      where: { dealId: bridge.dealId },
+      where: { id: bridge.id },
       data: {
         status: canonicalStatus,
         ...(canonicalStatus === DealChatStatus.CLOSED && bridge.status !== DealChatStatus.CLOSED
@@ -486,6 +518,82 @@ export async function closeDealChatBySystem(
   });
 }
 
+export async function bindThreadForParticipantWithExpectation(
+  input: BindThreadForParticipantWithExpectationInput,
+): Promise<BindThreadForParticipantWithExpectationResult> {
+  if (!input.dealId.trim()) {
+    throw new ValidationError('Deal ID is required');
+  }
+
+  const candidateThreadId = parsePositiveBigInt(input.candidateThreadId, 'candidateThreadId');
+  const expectedThreadId = input.expectedThreadId === null
+    ? null
+    : parsePositiveBigInt(input.expectedThreadId, 'expectedThreadId');
+
+  return prisma.$transaction(async (tx) => {
+    await lockDealSide(tx, input.dealId, input.side);
+    const deal = await getDealOrThrow(tx, input.dealId);
+    const bridge = await getOrCreateBridgeTx(tx, input.dealId);
+
+    const threadField = getThreadFieldBySide(input.side);
+    const openedAtField = getOpenedAtFieldBySide(input.side);
+    const currentThreadId = bridge[threadField];
+
+    if (currentThreadId !== expectedThreadId) {
+      return {
+        dealId: input.dealId,
+        side: input.side,
+        status: bridge.status,
+        threadId: currentThreadId,
+        counterpartyThreadId: getCounterpartyThreadId(bridge, input.side),
+        applied: false,
+      };
+    }
+
+    const advertiserThreadId = input.side === 'ADVERTISER'
+      ? candidateThreadId
+      : bridge.advertiserThreadId;
+    const publisherThreadId = input.side === 'PUBLISHER'
+      ? candidateThreadId
+      : bridge.publisherThreadId;
+
+    const nextStatus = deriveStatusFromThreads(
+      deal.status,
+      bridge.status,
+      advertiserThreadId,
+      publisherThreadId,
+    );
+
+    const updatePayload: Prisma.DealChatBridgeUpdateInput = {
+      [threadField]: candidateThreadId,
+      [openedAtField]: new Date(),
+    };
+
+    if (nextStatus !== bridge.status) {
+      updatePayload.status = nextStatus;
+      if (nextStatus === DealChatStatus.CLOSED && bridge.closedAt === null) {
+        updatePayload.closedAt = new Date();
+      }
+    }
+
+    const updated = await tx.dealChatBridge.update({
+      where: { id: bridge.id },
+      data: updatePayload,
+    });
+
+    return {
+      dealId: input.dealId,
+      side: input.side,
+      status: updated.status,
+      threadId: threadField === 'advertiserThreadId'
+        ? updated.advertiserThreadId
+        : updated.publisherThreadId,
+      counterpartyThreadId: getCounterpartyThreadId(updated, input.side),
+      applied: true,
+    };
+  });
+}
+
 export async function rebindThreadForParticipant(
   input: RebindThreadForParticipantInput,
 ): Promise<RebindThreadForParticipantResult> {
@@ -552,5 +660,6 @@ export const dealChatService = {
   resolveRouteByIncomingThread,
   closeDealChat,
   closeDealChatBySystem,
+  bindThreadForParticipantWithExpectation,
   rebindThreadForParticipant,
 };

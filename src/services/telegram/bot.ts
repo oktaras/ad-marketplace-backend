@@ -37,6 +37,24 @@ const RESEND_AFTER_RESTORE_MESSAGE =
 const DIRECT_MESSAGE_TOPIC_ONLY_NOTICE =
   'Please use deal-related topics for chat. Direct messages are not relayed.';
 const TOPIC_RECENT_GRACE_MS = 2 * 60 * 1000;
+const MAX_TOPIC_ENSURE_ATTEMPTS = 2;
+const MISSING_TOPIC_ERROR_TOKENS = [
+  'message thread not found',
+  'message_thread_not_found',
+  'forum topic not found',
+  'topic not found',
+  'topic deleted',
+  'topic_deleted',
+  'thread not found',
+  'message thread is not found',
+  'message thread is invalid',
+  'invalid message thread id',
+  'invalid message_thread_id',
+  'message thread id invalid',
+  'topic_id_invalid',
+  'direct_messages_topic_id_invalid',
+  'direct messages topic not found',
+];
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -249,18 +267,51 @@ function extractErrorText(error: unknown): string {
   }
 }
 
-function isMissingTopicError(error: unknown): boolean {
+function extractErrorCode(error: unknown): number | null {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+
+  const typed = error as {
+    error_code?: unknown;
+    code?: unknown;
+    response?: { error_code?: unknown };
+    error?: { error_code?: unknown; code?: unknown };
+  };
+
+  const candidates = [
+    typed.error_code,
+    typed.code,
+    typed.response?.error_code,
+    typed.error?.error_code,
+    typed.error?.code,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+export function isMissingTopicError(error: unknown): boolean {
   const normalized = extractErrorText(error).toLowerCase();
-  return [
-    'message thread not found',
-    'message_thread_not_found',
-    'forum topic not found',
-    'topic not found',
-    'topic deleted',
-    'topic_deleted',
-    'thread not found',
-    'message thread is not found',
-  ].some((token) => normalized.includes(token));
+  const hasMissingToken = MISSING_TOPIC_ERROR_TOKENS.some((token) => normalized.includes(token));
+  if (hasMissingToken) {
+    return true;
+  }
+
+  const code = extractErrorCode(error);
+  if (code !== 400) {
+    return false;
+  }
+
+  return normalized.includes('message thread')
+    || normalized.includes('forum topic')
+    || normalized.includes('topic_id')
+    || normalized.includes('direct_messages_topic');
 }
 
 async function isThreadReachable(chatId: bigint, threadId: bigint): Promise<boolean> {
@@ -310,12 +361,19 @@ async function sendDealTopicWelcomeMessage(params: {
   threadId: bigint;
   dealNumber: number;
 }): Promise<void> {
-  await sendTopicMessageWithRetry({
-    chatId: params.chatId,
-    threadId: params.threadId,
-    text: `Deal #${params.dealNumber} chat opened.\nMessages here are relayed anonymously.`,
-    context: `welcome:${params.dealNumber}`,
-  });
+  try {
+    await sendTopicMessageWithRetry({
+      chatId: params.chatId,
+      threadId: params.threadId,
+      text: `Deal #${params.dealNumber} chat opened.\nMessages here are relayed anonymously.`,
+      context: `welcome:${params.dealNumber}`,
+    });
+  } catch (error) {
+    console.warn(
+      `[deal-chat] non-critical welcome message failed dealNumber=${params.dealNumber} chatId=${params.chatId.toString()} threadId=${params.threadId.toString()}`,
+      error,
+    );
+  }
 }
 
 async function sendDealTopicRestoredMessage(params: {
@@ -323,12 +381,19 @@ async function sendDealTopicRestoredMessage(params: {
   threadId: bigint;
   dealNumber: number;
 }): Promise<void> {
-  await sendTopicMessageWithRetry({
-    chatId: params.chatId,
-    threadId: params.threadId,
-    text: 'Your deal chat was restored. Continue here.',
-    context: `restored:${params.dealNumber}`,
-  });
+  try {
+    await sendTopicMessageWithRetry({
+      chatId: params.chatId,
+      threadId: params.threadId,
+      text: 'Your deal chat was restored. Continue here.',
+      context: `restored:${params.dealNumber}`,
+    });
+  } catch (error) {
+    console.warn(
+      `[deal-chat] non-critical restored message failed dealNumber=${params.dealNumber} chatId=${params.chatId.toString()} threadId=${params.threadId.toString()}`,
+      error,
+    );
+  }
 }
 
 async function sendCounterpartyConnectedMessages(params: {
@@ -365,26 +430,37 @@ async function sendCounterpartyConnectedMessages(params: {
 
   const connectedMessage = 'Counterparty connected - you can chat here.';
 
-  await Promise.allSettled([
-    callWithTopicThreadParamFallback({
+  const connectedTargets = [
+    {
+      side: 'advertiser' as const,
       chatId: advertiserChatId,
       threadId: advertiserThreadId,
-      operation: (topicParam) => bot.api.sendMessage(
-        advertiserChatId.toString(),
-        connectedMessage,
-        topicParam as any,
-      ),
-    }),
-    callWithTopicThreadParamFallback({
+    },
+    {
+      side: 'publisher' as const,
       chatId: publisherChatId,
       threadId: publisherThreadId,
-      operation: (topicParam) => bot.api.sendMessage(
-        publisherChatId.toString(),
-        connectedMessage,
-        topicParam as any,
-      ),
-    }),
-  ]);
+    },
+  ];
+
+  await Promise.all(connectedTargets.map(async (target) => {
+    try {
+      await callWithTopicThreadParamFallback({
+        chatId: target.chatId,
+        threadId: target.threadId,
+        operation: (topicParam) => bot.api.sendMessage(
+          target.chatId.toString(),
+          connectedMessage,
+          topicParam as any,
+        ),
+      });
+    } catch (error) {
+      console.warn(
+        `[deal-chat] non-critical connected message failed dealId=${params.dealId} side=${target.side} chatId=${target.chatId.toString()} threadId=${target.threadId.toString()}`,
+        error,
+      );
+    }
+  }));
 }
 
 async function sendCounterpartyOpenDealChatPrompt(params: {
@@ -428,6 +504,22 @@ async function notifySenderResendAfterTopicRecovery(params: {
   });
 }
 
+async function sendCriticalTopicMessage(params: {
+  chatId: bigint;
+  threadId: bigint;
+  text: string;
+  context: string;
+}): Promise<void> {
+  try {
+    await sendTopicMessageWithRetry(params);
+  } catch (error) {
+    console.error(
+      `[deal-chat] critical topic message failed context=${params.context} chatId=${params.chatId.toString()} threadId=${params.threadId.toString()}`,
+      error,
+    );
+  }
+}
+
 async function sendTopicMessageWithRetry(params: {
   chatId: bigint;
   threadId: bigint;
@@ -436,6 +528,7 @@ async function sendTopicMessageWithRetry(params: {
   maxAttempts?: number;
 }): Promise<void> {
   const maxAttempts = Math.max(1, params.maxAttempts ?? 4);
+  let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -450,6 +543,7 @@ async function sendTopicMessageWithRetry(params: {
       });
       return;
     } catch (error) {
+      lastError = error;
       const isMissingThread = isMissingTopicError(error);
       const canRetryMissing = isMissingThread && attempt < maxAttempts;
       if (canRetryMissing) {
@@ -457,13 +551,62 @@ async function sendTopicMessageWithRetry(params: {
         await sleep(delayMs);
         continue;
       }
-
-      console.warn(
-        `[deal-chat] failed to send topic message context=${params.context} chatId=${params.chatId.toString()} threadId=${params.threadId.toString()}`,
-        error,
-      );
-      return;
+      break;
     }
+  }
+
+  console.warn(
+    `[deal-chat] failed to send topic message context=${params.context} chatId=${params.chatId.toString()} threadId=${params.threadId.toString()}`,
+    lastError,
+  );
+  throw lastError instanceof Error ? lastError : new Error('Failed to send topic message');
+}
+
+async function sendTopicMessageBestEffort(params: {
+  chatId: bigint;
+  threadId: bigint;
+  text: string;
+  context: string;
+  maxAttempts?: number;
+}): Promise<boolean> {
+  try {
+    await sendTopicMessageWithRetry(params);
+    return true;
+  } catch (error) {
+    console.warn(
+      `[deal-chat] best-effort topic message failed context=${params.context} chatId=${params.chatId.toString()} threadId=${params.threadId.toString()}`,
+      error,
+    );
+    return false;
+  }
+}
+
+function buildStaleDuplicateTopicName(dealNumber: number): string {
+  const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
+  return `Deal #${dealNumber} (Stale duplicate ${timestamp})`;
+}
+
+async function renameStaleDuplicateTopic(params: {
+  dealId: string;
+  side: DealChatParticipantSide;
+  chatId: bigint;
+  threadId: bigint;
+  dealNumber: number;
+}): Promise<void> {
+  try {
+    await renamePrivateDealTopic(
+      params.chatId,
+      params.threadId,
+      buildStaleDuplicateTopicName(params.dealNumber),
+    );
+    console.warn(
+      `[deal-chat] orphan-rename result=ok dealId=${params.dealId} side=${params.side} threadId=${params.threadId.toString()} action=rename-stale-duplicate`,
+    );
+  } catch (error) {
+    console.warn(
+      `[deal-chat] orphan-rename result=failed dealId=${params.dealId} side=${params.side} threadId=${params.threadId.toString()} action=rename-stale-duplicate`,
+      error,
+    );
   }
 }
 
@@ -536,6 +679,111 @@ async function sendRelayTextMessage(params: {
       topicParam as any,
     ),
   });
+}
+
+async function relayIncomingMessageToTopic(params: {
+  message: NonNullable<BotContext['message']>;
+  fromSide: DealChatParticipantSide;
+  sourceChatId: bigint;
+  destinationChatId: bigint;
+  destinationThreadId: bigint;
+}): Promise<void> {
+  const roleLabel = formatParticipantRoleLabel(params.fromSide);
+  const relayText = extractRelayTextFromMessage(params.message, roleLabel);
+  if (relayText !== null) {
+    await sendRelayTextMessage({
+      destinationChatId: params.destinationChatId,
+      destinationThreadId: params.destinationThreadId,
+      text: relayText,
+    });
+    return;
+  }
+
+  const relayCaption = extractRelayCaptionFromMessage(params.message, roleLabel);
+  await copyMessageToTopic({
+    destinationChatId: params.destinationChatId,
+    destinationThreadId: params.destinationThreadId,
+    sourceChatId: params.sourceChatId,
+    sourceMessageId: params.message.message_id,
+    ...(relayCaption !== null ? { caption: relayCaption } : {}),
+  });
+}
+
+type RelayRecoveryDestination = {
+  chatId: bigint;
+  threadId: bigint;
+  recreated: boolean;
+};
+
+export function buildRecoveryEnsureParticipantTopicParams(
+  dealId: string,
+  toSide: DealChatParticipantSide,
+): {
+  dealId: string;
+  side: DealChatParticipantSide;
+  recreateOnUnreachable: true;
+  bypassRecentGraceWindow: true;
+} {
+  return {
+    dealId,
+    side: toSide,
+    recreateOnUnreachable: true,
+    bypassRecentGraceWindow: true,
+  };
+}
+
+export async function recoverRelayAndRetryOnce(params: {
+  dealId: string;
+  fromThreadId: bigint;
+  toSide: DealChatParticipantSide;
+  ensureDestinationTopic: () => Promise<RelayRecoveryDestination>;
+  retryRelayToDestination: (destination: RelayRecoveryDestination) => Promise<void>;
+  notifySenderResend: () => Promise<void>;
+}): Promise<'retry_succeeded' | 'resend_notified' | 'recovery_failed'> {
+  console.info(
+    `[deal-chat] recovery attempt dealId=${params.dealId} fromThreadId=${params.fromThreadId.toString()} toSide=${params.toSide}`,
+  );
+
+  try {
+    const recoveredDestination = await params.ensureDestinationTopic();
+    console.info(
+      `[deal-chat] recovery result=ok dealId=${params.dealId} recoveredThreadId=${recoveredDestination.threadId.toString()} recreated=${recoveredDestination.recreated ? 'true' : 'false'}`,
+    );
+
+    try {
+      console.info(
+        `[deal-chat] auto-retry attempt dealId=${params.dealId} destinationThreadId=${recoveredDestination.threadId.toString()}`,
+      );
+      await params.retryRelayToDestination(recoveredDestination);
+      console.info(
+        `[deal-chat] auto-retry result=ok dealId=${params.dealId} destinationThreadId=${recoveredDestination.threadId.toString()}`,
+      );
+      return 'retry_succeeded';
+    } catch (retryError) {
+      console.error(
+        `[deal-chat] auto-retry result=failed dealId=${params.dealId} destinationThreadId=${recoveredDestination.threadId.toString()}`,
+        retryError,
+      );
+      console.error(`Failed to relay after destination recovery for deal ${params.dealId}:`, retryError);
+
+      try {
+        await params.notifySenderResend();
+      } catch (notifyError) {
+        console.error(
+          `[deal-chat] failed to send resend-after-recovery notice dealId=${params.dealId} fromThreadId=${params.fromThreadId.toString()}`,
+          notifyError,
+        );
+      }
+      return 'resend_notified';
+    }
+  } catch (recoveryError) {
+    console.error(
+      `[deal-chat] recovery result=failed dealId=${params.dealId} fromThreadId=${params.fromThreadId.toString()} toSide=${params.toSide}`,
+      recoveryError,
+    );
+    console.error(`Failed to recover destination topic after relay error for deal ${params.dealId}:`, recoveryError);
+    return 'recovery_failed';
+  }
 }
 
 function buildDealTopicTargets(deal: {
@@ -830,6 +1078,7 @@ async function ensureParticipantTopic(params: {
   dealId: string;
   side: DealChatParticipantSide;
   recreateOnUnreachable?: boolean;
+  bypassRecentGraceWindow?: boolean;
 }): Promise<{
   chatId: bigint;
   threadId: bigint;
@@ -843,109 +1092,167 @@ async function ensureParticipantTopic(params: {
     throw new Error('Deal ID is required');
   }
 
-  const deal = await prisma.deal.findUnique({
-    where: { id: normalizedDealId },
-    select: {
-      dealNumber: true,
-      advertiser: {
-        select: { telegramId: true },
-      },
-      channelOwner: {
-        select: { telegramId: true },
-      },
-      dealChatBridge: {
-        select: {
-          status: true,
-          advertiserThreadId: true,
-          publisherThreadId: true,
-          advertiserOpenedAt: true,
-          publisherOpenedAt: true,
+  const shouldRecreateOnUnreachable = params.recreateOnUnreachable ?? true;
+  const bypassRecentGraceWindow = params.bypassRecentGraceWindow ?? false;
+
+  for (let attempt = 1; attempt <= MAX_TOPIC_ENSURE_ATTEMPTS; attempt += 1) {
+    const deal = await prisma.deal.findUnique({
+      where: { id: normalizedDealId },
+      select: {
+        dealNumber: true,
+        advertiser: {
+          select: { telegramId: true },
+        },
+        channelOwner: {
+          select: { telegramId: true },
+        },
+        dealChatBridge: {
+          select: {
+            status: true,
+            advertiserThreadId: true,
+            publisherThreadId: true,
+            advertiserOpenedAt: true,
+            publisherOpenedAt: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  if (!deal) {
-    throw new Error('Deal not found');
-  }
+    if (!deal) {
+      throw new Error('Deal not found');
+    }
 
-  const isAdvertiserSide = params.side === 'ADVERTISER';
-  const chatId = isAdvertiserSide
-    ? deal.advertiser.telegramId
-    : deal.channelOwner.telegramId;
-  const existingThreadId = isAdvertiserSide
-    ? deal.dealChatBridge?.advertiserThreadId ?? null
-    : deal.dealChatBridge?.publisherThreadId ?? null;
-  const existingOpenedAt = isAdvertiserSide
-    ? deal.dealChatBridge?.advertiserOpenedAt ?? null
-    : deal.dealChatBridge?.publisherOpenedAt ?? null;
-  const counterpartyThreadId = isAdvertiserSide
-    ? deal.dealChatBridge?.publisherThreadId ?? null
-    : deal.dealChatBridge?.advertiserThreadId ?? null;
+    const isAdvertiserSide = params.side === 'ADVERTISER';
+    const chatId = isAdvertiserSide
+      ? deal.advertiser.telegramId
+      : deal.channelOwner.telegramId;
+    const existingThreadId = isAdvertiserSide
+      ? deal.dealChatBridge?.advertiserThreadId ?? null
+      : deal.dealChatBridge?.publisherThreadId ?? null;
+    const existingOpenedAt = isAdvertiserSide
+      ? deal.dealChatBridge?.advertiserOpenedAt ?? null
+      : deal.dealChatBridge?.publisherOpenedAt ?? null;
+    const counterpartyThreadId = isAdvertiserSide
+      ? deal.dealChatBridge?.publisherThreadId ?? null
+      : deal.dealChatBridge?.advertiserThreadId ?? null;
+    const status = deal.dealChatBridge?.status ?? DealChatStatus.PENDING_OPEN;
 
-  if (!chatId) {
-    throw new Error(`Missing Telegram ID for deal participant side: ${params.side}`);
-  }
+    if (!chatId) {
+      throw new Error(`Missing Telegram ID for deal participant side: ${params.side}`);
+    }
 
-  if (existingThreadId !== null) {
-    const reachable = await isThreadReachable(chatId, existingThreadId);
-    const shouldRecreateOnUnreachable = params.recreateOnUnreachable ?? true;
-    const withinRecentGraceWindow = isRecentDateWithinMs(existingOpenedAt, TOPIC_RECENT_GRACE_MS);
-    if (!reachable && shouldRecreateOnUnreachable && withinRecentGraceWindow) {
+    if (existingThreadId !== null) {
+      const reachable = await isThreadReachable(chatId, existingThreadId);
+      const withinRecentGraceWindow = !bypassRecentGraceWindow
+        && isRecentDateWithinMs(existingOpenedAt, TOPIC_RECENT_GRACE_MS);
+      if (!reachable && shouldRecreateOnUnreachable && withinRecentGraceWindow) {
+        return {
+          chatId,
+          threadId: existingThreadId,
+          recreated: false,
+          reachable: false,
+          status,
+          counterpartyThreadId,
+        };
+      }
+      if (reachable || !shouldRecreateOnUnreachable) {
+        return {
+          chatId,
+          threadId: existingThreadId,
+          recreated: false,
+          reachable,
+          status,
+          counterpartyThreadId,
+        };
+      }
+    }
+
+    console.info(
+      `[deal-chat] topic-create attempt dealId=${normalizedDealId} side=${params.side} attempt=${attempt} expectedThreadId=${existingThreadId?.toString() ?? 'null'}`,
+    );
+    let createdThreadId: bigint;
+    try {
+      createdThreadId = await createPrivateDealTopic(
+        chatId,
+        `Deal #${deal.dealNumber}`,
+      );
+    } catch (error) {
+      console.error(
+        `[deal-chat] topic-create result=failed dealId=${normalizedDealId} side=${params.side} attempt=${attempt}`,
+        error,
+      );
+      throw error;
+    }
+    console.info(
+      `[deal-chat] topic-create result=ok dealId=${normalizedDealId} side=${params.side} threadId=${createdThreadId.toString()} attempt=${attempt}`,
+    );
+
+    const bindResult = await dealChatService.bindThreadForParticipantWithExpectation({
+      dealId: normalizedDealId,
+      side: params.side,
+      candidateThreadId: createdThreadId,
+      expectedThreadId: existingThreadId,
+    });
+    console.info(
+      `[deal-chat] cas-bind result=${bindResult.applied ? 'applied' : 'missed'} dealId=${normalizedDealId} side=${params.side} candidateThreadId=${createdThreadId.toString()} expectedThreadId=${existingThreadId?.toString() ?? 'null'} currentThreadId=${bindResult.threadId?.toString() ?? 'null'}`,
+    );
+
+    if (bindResult.applied) {
+      if (existingThreadId !== null) {
+        await sendDealTopicRestoredMessage({
+          chatId,
+          threadId: createdThreadId,
+          dealNumber: deal.dealNumber,
+        });
+      } else {
+        await sendDealTopicWelcomeMessage({
+          chatId,
+          threadId: createdThreadId,
+          dealNumber: deal.dealNumber,
+        });
+      }
+
       return {
         chatId,
-        threadId: existingThreadId,
-        recreated: false,
-        reachable: false,
-        status: deal.dealChatBridge?.status ?? DealChatStatus.PENDING_OPEN,
-        counterpartyThreadId,
+        threadId: createdThreadId,
+        recreated: true,
+        reachable: true,
+        status: bindResult.status,
+        counterpartyThreadId: bindResult.counterpartyThreadId,
       };
     }
-    if (reachable || !shouldRecreateOnUnreachable) {
-      return {
-        chatId,
-        threadId: existingThreadId,
-        recreated: false,
-        reachable,
-        status: deal.dealChatBridge?.status ?? DealChatStatus.PENDING_OPEN,
-        counterpartyThreadId,
-      };
-    }
-  }
 
-  const createdThreadId = await createPrivateDealTopic(
-    chatId,
-    `Deal #${deal.dealNumber}`,
-  );
-
-  const rebound = await dealChatService.rebindThreadForParticipant({
-    dealId: normalizedDealId,
-    side: params.side,
-    threadId: createdThreadId,
-  });
-
-  if (existingThreadId !== null) {
-    await sendDealTopicRestoredMessage({
+    await renameStaleDuplicateTopic({
+      dealId: normalizedDealId,
+      side: params.side,
       chatId,
       threadId: createdThreadId,
       dealNumber: deal.dealNumber,
     });
-  } else {
-    await sendDealTopicWelcomeMessage({
-      chatId,
-      threadId: createdThreadId,
-      dealNumber: deal.dealNumber,
-    });
+
+    // On CAS miss, force a re-read pass to pick the canonical state after the winner writes.
+    if (attempt < MAX_TOPIC_ENSURE_ATTEMPTS) {
+      continue;
+    }
+
+    if (bindResult.threadId !== null) {
+      const reachable = await isThreadReachable(chatId, bindResult.threadId);
+      if (reachable || !shouldRecreateOnUnreachable) {
+        return {
+          chatId,
+          threadId: bindResult.threadId,
+          recreated: false,
+          reachable,
+          status: bindResult.status,
+          counterpartyThreadId: bindResult.counterpartyThreadId,
+        };
+      }
+    } else {
+      throw new Error(`Unable to ensure participant topic for deal ${normalizedDealId}`);
+    }
   }
 
-  return {
-    chatId,
-    threadId: createdThreadId,
-    recreated: true,
-    reachable: true,
-    status: rebound.status,
-    counterpartyThreadId: rebound.counterpartyThreadId,
-  };
+  throw new Error(`Unable to ensure participant topic for deal ${normalizedDealId}`);
 }
 
 export async function openDealChatInPrivateTopic(params: {
@@ -1192,7 +1499,7 @@ bot.command('close', async (ctx) => {
   });
 
   if (!routing) {
-    await sendTopicMessageWithRetry({
+    await sendTopicMessageBestEffort({
       chatId: BigInt(ctx.chat.id),
       threadId: incomingThreadId,
       text: 'This topic is not linked to a deal chat.',
@@ -1213,7 +1520,7 @@ bot.command('close', async (ctx) => {
 
     await finalizeDealTopicsOnClose(routing.dealId);
 
-    await sendTopicMessageWithRetry({
+    await sendTopicMessageBestEffort({
       chatId: BigInt(ctx.chat.id),
       threadId: routing.fromThreadId,
       text: wasAlreadyClosed ? 'Deal chat is already closed.' : 'Deal chat closed.',
@@ -1221,7 +1528,7 @@ bot.command('close', async (ctx) => {
     });
   } catch (error) {
     console.error(`Failed to close deal chat for deal ${routing.dealId}:`, error);
-    await sendTopicMessageWithRetry({
+    await sendTopicMessageBestEffort({
       chatId: BigInt(ctx.chat.id),
       threadId: routing.fromThreadId,
       text: 'Failed to close deal chat.',
@@ -1321,7 +1628,7 @@ bot.on('message', async (ctx) => {
   }
 
   if (routing.status === DealChatStatus.CLOSED) {
-    await sendTopicMessageWithRetry({
+    await sendTopicMessageBestEffort({
       chatId: BigInt(ctx.chat.id),
       threadId: routing.fromThreadId,
       text: 'Deal chat is closed.',
@@ -1331,7 +1638,7 @@ bot.on('message', async (ctx) => {
   }
 
   if (!routing.canRelay || routing.toThreadId === null) {
-    await sendTopicMessageWithRetry({
+    await sendTopicMessageBestEffort({
       chatId: BigInt(ctx.chat.id),
       threadId: routing.fromThreadId,
       text: "Counterparty hasn't opened deal chat yet.",
@@ -1342,7 +1649,7 @@ bot.on('message', async (ctx) => {
 
   const counterpartyChatId = await resolveCounterpartyChatId(routing.dealId, routing.toSide);
   if (!counterpartyChatId) {
-    await sendTopicMessageWithRetry({
+    await sendTopicMessageBestEffort({
       chatId: BigInt(ctx.chat.id),
       threadId: routing.fromThreadId,
       text: "Counterparty hasn't opened deal chat yet.",
@@ -1360,7 +1667,7 @@ bot.on('message', async (ctx) => {
     });
   } catch (error) {
     console.error(`Failed to verify destination topic for deal ${routing.dealId}:`, error);
-    await sendTopicMessageWithRetry({
+    await sendCriticalTopicMessage({
       chatId: BigInt(ctx.chat.id),
       threadId: routing.fromThreadId,
       text: 'Failed to relay message. Please try again.',
@@ -1369,57 +1676,42 @@ bot.on('message', async (ctx) => {
     return;
   }
 
-  if (destinationTopic.recreated) {
-    await notifySenderResendAfterTopicRecovery({
-      chatId: BigInt(ctx.chat.id),
-      threadId: routing.fromThreadId,
-    });
-    return;
-  }
-
   try {
-    const roleLabel = formatParticipantRoleLabel(routing.fromSide);
-    const relayText = extractRelayTextFromMessage(ctx.message, roleLabel);
-    if (relayText !== null) {
-      await sendRelayTextMessage({
-        destinationChatId: destinationTopic.chatId,
-        destinationThreadId: destinationTopic.threadId,
-        text: relayText,
-      });
-      return;
-    }
-
-    const relayCaption = extractRelayCaptionFromMessage(ctx.message, roleLabel);
-
-    await copyMessageToTopic({
+    await relayIncomingMessageToTopic({
+      message: ctx.message,
+      fromSide: routing.fromSide,
+      sourceChatId: BigInt(ctx.chat.id),
       destinationChatId: destinationTopic.chatId,
       destinationThreadId: destinationTopic.threadId,
-      sourceChatId: BigInt(ctx.chat.id),
-      sourceMessageId: ctx.message.message_id,
-      ...(relayCaption !== null ? { caption: relayCaption } : {}),
     });
   } catch (error) {
     if (isMissingTopicError(error)) {
-      try {
-        const recoveredDestination = await ensureParticipantTopic({
-          dealId: routing.dealId,
-          side: routing.toSide,
-        });
-
-        if (recoveredDestination.recreated) {
-          await notifySenderResendAfterTopicRecovery({
-            chatId: BigInt(ctx.chat.id),
-            threadId: routing.fromThreadId,
-          });
-          return;
-        }
-      } catch (recoveryError) {
-        console.error(`Failed to recover destination topic after relay error for deal ${routing.dealId}:`, recoveryError);
+      const recoveryResult = await recoverRelayAndRetryOnce({
+        dealId: routing.dealId,
+        fromThreadId: routing.fromThreadId,
+        toSide: routing.toSide,
+        ensureDestinationTopic: () => ensureParticipantTopic(
+          buildRecoveryEnsureParticipantTopicParams(routing.dealId, routing.toSide),
+        ),
+        retryRelayToDestination: (recoveredDestination) => relayIncomingMessageToTopic({
+          message: ctx.message,
+          fromSide: routing.fromSide,
+          sourceChatId: BigInt(ctx.chat.id),
+          destinationChatId: recoveredDestination.chatId,
+          destinationThreadId: recoveredDestination.threadId,
+        }),
+        notifySenderResend: () => notifySenderResendAfterTopicRecovery({
+          chatId: BigInt(ctx.chat.id),
+          threadId: routing.fromThreadId,
+        }),
+      });
+      if (recoveryResult !== 'recovery_failed') {
+        return;
       }
     }
 
     console.error(`Failed to relay deal chat message for deal ${routing.dealId}:`, error);
-    await sendTopicMessageWithRetry({
+    await sendCriticalTopicMessage({
       chatId: BigInt(ctx.chat.id),
       threadId: routing.fromThreadId,
       text: 'Failed to relay message. Please try again.',
