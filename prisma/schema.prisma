@@ -717,7 +717,6 @@ model Deal {
   metadata Json? // Extensible data
 
   // Relations
-  messages             DealMessage[]
   dealChatBridge       DealChatBridge?
   events               DealEvent[]
   postingPlanProposals DealPostingPlanProposal[]
@@ -830,37 +829,6 @@ enum CreativeStatus {
   REVISION_REQUESTED
   APPROVED
   POSTED
-}
-
-/// Messages within a deal (negotiation, updates)
-model DealMessage {
-  id       String @id @default(cuid())
-  dealId   String
-  deal     Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  senderId String
-
-  // Content
-  type     MessageType @default(TEXT)
-  content  String
-  metadata Json? // Additional data based on type
-
-  // Delivery
-  telegramMessageId BigInt? // If sent via bot
-
-  createdAt DateTime  @default(now())
-  readAt    DateTime?
-
-  @@index([dealId, createdAt])
-  @@map("deal_messages")
-}
-
-enum MessageType {
-  TEXT
-  SYSTEM // System notification
-  PRICE_PROPOSAL // Price negotiation
-  TERMS_UPDATE // Terms change
-  CREATIVE_SUBMIT // Creative submission notification
-  APPROVAL // Approval notification
 }
 
 /// Deal events for audit trail
@@ -1265,85 +1233,6 @@ model SystemConfig {
   updatedAt DateTime @updatedAt
 
   @@map("system_config")
-}
-
-/// Platform wallet addresses for different networks and purposes
-model PlatformWallet {
-  id String @id @default(cuid())
-
-  // Network identification
-  network NetworkType   @default(TESTNET)
-  purpose WalletPurpose
-
-  // Wallet details
-  address     String
-  label       String // "Fee Collection", "Gas/Deploy", etc.
-  description String?
-
-  // For hot wallets - encrypted key storage
-  encryptedKey String?
-  keyVersion   Int     @default(1)
-
-  // Monitoring
-  minBalance    String? // Alert if below this
-  cachedBalance String?
-  lastSyncedAt  DateTime?
-
-  // Status
-  isActive Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([network, purpose])
-  @@index([network, isActive])
-  @@map("platform_wallets")
-}
-
-enum NetworkType {
-  MAINNET
-  TESTNET
-}
-
-enum WalletPurpose {
-  FEE_COLLECTION // Receives platform fees from escrow releases
-  GAS_OPERATIONS // Hot wallet for gas/deployment costs
-  TREASURY // Cold storage for accumulated fees
-}
-
-/// Scheduled jobs tracking
-model ScheduledJob {
-  id          String  @id @default(cuid())
-  type        String // Job type identifier
-  referenceId String? // Related entity ID
-
-  // Schedule
-  scheduledFor DateTime
-
-  // Execution
-  status    JobStatus @default(PENDING)
-  attempts  Int       @default(0)
-  lastError String?
-
-  // Data
-  payload Json?
-  result  Json?
-
-  // Timestamps
-  createdAt  DateTime  @default(now())
-  executedAt DateTime?
-
-  @@index([type, status, scheduledFor])
-  @@index([referenceId])
-  @@map("scheduled_jobs")
-}
-
-enum JobStatus {
-  PENDING
-  RUNNING
-  COMPLETED
-  FAILED
-  CANCELLED
 }
 
 /// Audit log for sensitive operations
