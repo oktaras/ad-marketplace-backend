@@ -42,8 +42,9 @@ npm run db:migrate:prod   # or db:migrate in local dev
 
 ## Documentation files
 
+- [`backend-technical.md`](./backend-technical.md): backend runtime architecture, OpenAPI flow, escrow integration, and deal-chat relay model.
 - [`database-table-catalog.md`](./database-table-catalog.md): schema-level table descriptions and relations.
-- [`database-erd.svg`](./database-erd.svg): ERD diagram.
+- [`prisma-erd.svg`](./prisma-erd.svg): ERD diagram.
 
 ## Notes
 

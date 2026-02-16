@@ -39,4 +39,4 @@ Schema baseline: `backend/prisma/schema.prisma`
 
 ## ERD
 
-![Database ERD](./database-erd.svg)
+![Database ERD](./prisma-erd.svg)
