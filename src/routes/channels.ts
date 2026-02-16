@@ -1708,6 +1708,82 @@ router.put('/:id', telegramAuth, async (req, res, next) => {
   }
 });
 
+const TERMINAL_DEAL_STATUSES = ['COMPLETED', 'CANCELLED', 'EXPIRED', 'REFUNDED', 'RESOLVED'] as const;
+
+router.delete('/:id', telegramAuth, async (req, res, next) => {
+  try {
+    const channelId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
+      select: {
+        id: true,
+        ownerId: true,
+        deletedAt: true,
+      },
+    });
+
+    if (!channel || channel.deletedAt) {
+      throw new NotFoundError('Channel');
+    }
+
+    if (channel.ownerId !== req.user!.id) {
+      throw new ForbiddenError('Not channel owner');
+    }
+
+    const activeDealsCount = await prisma.deal.count({
+      where: {
+        channelId,
+        status: {
+          notIn: [...TERMINAL_DEAL_STATUSES],
+        },
+      },
+    });
+
+    if (activeDealsCount > 0) {
+      throw new ValidationError('Cannot remove channel while active deals exist');
+    }
+
+    await prisma.$transaction([
+      prisma.channel.update({
+        where: { id: channelId },
+        data: {
+          status: 'REMOVED',
+          deletedAt: new Date(),
+        },
+      }),
+      prisma.listing.updateMany({
+        where: {
+          channelId,
+          status: {
+            notIn: ['SOLD_OUT', 'EXPIRED', 'REMOVED'],
+          },
+        },
+        data: {
+          status: 'REMOVED',
+        },
+      }),
+    ]);
+
+    const hasRemainingChannels = await prisma.channel.count({
+      where: {
+        ownerId: req.user!.id,
+        deletedAt: null,
+      },
+    });
+
+    if (!hasRemainingChannels && req.user!.isChannelOwner) {
+      await prisma.user.update({
+        where: { id: req.user!.id },
+        data: { isChannelOwner: false },
+      });
+    }
+
+    res.json({ deleted: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 /**
  * @openapi
  * /api/channels/{id}/formats:
