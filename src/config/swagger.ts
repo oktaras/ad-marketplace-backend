@@ -1,7 +1,6 @@
 import swaggerJSDoc from 'swagger-jsdoc';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config } from './index.js';
 
 const swaggerDefinition = {
   openapi: '3.0.0',
@@ -15,8 +14,10 @@ const swaggerDefinition = {
   },
   servers: [
     {
-      url: config.nodeEnv === 'production' ? 'https://api.yourdomain.com' : `http://localhost:${config.port}`,
-      description: config.nodeEnv === 'production' ? 'Production server' : 'Development server',
+      // Use same-origin to avoid http/https mismatch in Swagger "Try it out".
+      // This keeps docs working both for local HTTP and local HTTPS cert mode.
+      url: '/',
+      description: 'Current server origin',
     },
   ],
   components: {
